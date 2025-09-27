@@ -1,0 +1,37 @@
+{
+  "discord": {
+    "enabled": false,
+    "token": "YOUR_DISCORD_BOT_TOKEN",
+    "applicationId": "",
+    "guildId": "",
+    "commandPrefix": "!",
+    "commandName": "verify"
+  },
+  "telegram": {
+    "enabled": false,
+    "token": "YOUR_TELEGRAM_BOT_TOKEN",
+    "joinMessage": "Welcome to the community! Please review the pinned rules after joining.",
+    "groupIds": [
+      "@your_telegram_group"
+    ]
+  },
+  "http": {
+    "enabled": true,
+    "port": 3000,
+    "authToken": "change-me"
+  },
+  "verification": {
+    "minimumVolume": 1000,
+    "defaultExchange": "mock",
+    "exchanges": {
+      "mock": {
+        "type": "mock",
+        "description": "Static mock volumes used for development and testing.",
+        "volumes": {
+          "demo-user": 2500,
+          "new-user": 500
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,311 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "EKIS Volume Verification API",
+    "description": "HTTP API for verifying trading volume thresholds and listing configured exchanges.",
+    "version": "1.0.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "summary": "Health check",
+        "tags": ["System"],
+        "responses": {
+          "200": {
+            "description": "Service is running",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "example": "ok"
+                    },
+                    "timestamp": {
+                      "type": "string",
+                      "format": "date-time"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/exchanges": {
+      "get": {
+        "summary": "List exchanges",
+        "tags": ["Verification"],
+        "security": [
+          { "bearerAuth": [] }
+        ],
+        "responses": {
+          "200": {
+            "description": "Array of configured exchanges",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "exchanges": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Exchange"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          }
+        }
+      }
+    },
+    "/api/verify": {
+      "post": {
+        "summary": "Verify a UID",
+        "tags": ["Verification"],
+        "security": [
+          { "bearerAuth": [] }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerificationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Verification result",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerificationResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request or verification failure",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/UnauthorizedError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "bearerFormat": "Token"
+      }
+    },
+    "schemas": {
+      "Exchange": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "example": "mock"
+          },
+          "type": {
+            "type": "string",
+            "example": "mock"
+          },
+          "minimumVolume": {
+            "type": "number",
+            "example": 1000,
+            "description": "Default minimum volume threshold for the exchange."
+          },
+          "description": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string",
+            "nullable": true,
+            "example": "Blofin"
+          },
+          "databaseId": {
+            "type": "integer",
+            "nullable": true,
+            "example": 12
+          },
+          "affiliateLink": {
+            "type": "string",
+            "nullable": true,
+            "example": "https://www.blofin.com/register?aff=1234"
+          },
+          "depositThreshold": {
+            "type": "number",
+            "nullable": true,
+            "example": 1000
+          }
+        }
+      },
+      "VerificationRequest": {
+        "type": "object",
+        "required": ["uid"],
+        "properties": {
+          "uid": {
+            "type": "string",
+            "example": "demo-user"
+          },
+          "exchangeId": {
+            "type": "string",
+            "example": "mock"
+          },
+          "minimumVolume": {
+            "type": "number",
+            "example": 1500,
+            "description": "Optional override for the minimum volume requirement. Must be a finite number."
+          },
+          "telegramId": {
+            "type": "string",
+            "description": "Optional Telegram user ID associated with the verification request.",
+            "nullable": true,
+            "example": "123456789"
+          },
+          "discordUserId": {
+            "type": "string",
+            "description": "Optional Discord user ID associated with the verification request.",
+            "nullable": true,
+            "example": "987654321"
+          },
+          "guildId": {
+            "type": "string",
+            "description": "Optional Discord guild ID when the verification originates from a server.",
+            "nullable": true,
+            "example": "1122334455"
+          },
+          "userId": {
+            "type": "string",
+            "description": "Optional backend user identifier supplied by first-party integrations.",
+            "nullable": true,
+            "example": "internal-user-42"
+          }
+        }
+      },
+      "DepositResult": {
+        "type": "object",
+        "properties": {
+          "threshold": {
+            "type": "number",
+            "nullable": true,
+            "description": "Configured deposit threshold for the exchange.",
+            "example": 1000
+          },
+          "evaluatedThreshold": {
+            "type": "number",
+            "nullable": true,
+            "description": "The actual threshold value sent to the exchange API.",
+            "example": 0
+          },
+          "met": {
+            "type": "boolean",
+            "description": "Indicates whether the deposit requirement was satisfied."
+          },
+          "amount": {
+            "type": "number",
+            "nullable": true,
+            "description": "Deposit amount returned by the exchange, when available.",
+            "example": 1250.5
+          },
+          "reason": {
+            "type": "string",
+            "nullable": true,
+            "description": "Failure reason provided by the exchange when the deposit requirement is not met.",
+            "example": "user_not_found"
+          }
+        }
+      },
+      "VerificationResponse": {
+        "type": "object",
+        "properties": {
+          "uid": { "type": "string" },
+          "exchangeId": { "type": "string" },
+          "volume": { "type": "number" },
+          "minimumVolume": { "type": "number" },
+          "passed": { "type": "boolean" },
+          "volumeMet": {
+            "type": "boolean",
+            "nullable": true,
+            "description": "Indicates whether the recorded volume meets the configured target (informational only)."
+          },
+          "skipped": {
+            "type": "boolean",
+            "description": "True when volume checks are disabled in configuration."
+          },
+          "timestamp": { "type": "string", "format": "date-time" },
+          "source": {
+            "type": "object",
+            "description": "Debug information about the exchange response"
+          },
+          "deposit": {
+            "$ref": "#/components/schemas/DepositResult"
+          },
+          "exchangeName": {
+            "type": "string",
+            "nullable": true,
+            "description": "Human-friendly exchange label when available.",
+            "example": "Blofin"
+          },
+          "exchangeDbId": {
+            "type": "integer",
+            "nullable": true,
+            "description": "Database identifier for the exchange, when persisted."
+          },
+          "affiliateLink": {
+            "type": "string",
+            "nullable": true,
+            "description": "Affiliate link configured for the exchange.",
+            "example": "https://www.blofin.com/register?aff=1234"
+          },
+          "influencer": {
+            "type": "string",
+            "description": "Identifier used to enforce unique UID verification records.",
+            "example": "blofin"
+          }
+        }
+      },
+      "ErrorResponse": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "responses": {
+      "UnauthorizedError": {
+        "description": "Authentication is required",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/ErrorResponse"
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -181,6 +181,29 @@ const buildExchangeKeyboard = (exchanges) => {
   return inlineKeyboard;
 };
 
+// Build human-friendly labels for invite buttons. Usernames prefixed with @ are
+// shown directly so recipients can recognise the destination, whereas numeric
+// identifiers fall back to a generic label that still differentiates multiple
+// groups when more than one invite is available.
+const buildInviteButtonLabel = (groupId, index, total) => {
+  if (groupId && groupId.startsWith('@')) {
+    return `Join ${groupId}`;
+  }
+
+  if (total === 1) {
+    return 'Join Telegram space';
+  }
+
+  return `Join space ${index + 1}`;
+};
+
+// Inline keyboard payload that pairs generated invite links with descriptive
+// button captions, ensuring users receive tappable buttons instead of raw URLs.
+const buildInviteKeyboard = (invites) => invites.map((invite, index, all) => [{
+  text: buildInviteButtonLabel(invite.groupId, index, all.length),
+  url: invite.link
+}]);
+
 export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerifier, configUpdater }) => async (msg, argsText) => {
   const chatId = msg.chat.id;
 
@@ -662,7 +685,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       for (const groupId of groupIds) {
         try {
           const invite = await bot.createChatInviteLink(groupId, { member_limit: 1 });
-          inviteLinks.push(invite.invite_link);
+          inviteLinks.push({ link: invite.invite_link, groupId });
           logger.info(`Generated one-time invite link for Telegram group ${groupId}.`, {
             exchangeId,
             uid,
@@ -686,10 +709,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       }
 
       if (inviteLinks.length) {
-        responseLines.push('', 'Here are your one-time invite links:');
-        inviteLinks.forEach((link) => {
-          responseLines.push(`• ${link}`);
-        });
+        responseLines.push('', 'Tap a button below to join your Telegram spaces:');
       } else {
         responseLines.push('', 'No Telegram groups are configured for automated invites. Please contact support for access.');
       }
@@ -701,7 +721,13 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
         });
       }
 
-      await bot.sendMessage(chatId, responseLines.join('\n'), { disable_web_page_preview: true });
+      const messageOptions = { disable_web_page_preview: true };
+
+      if (inviteLinks.length) {
+        messageOptions.reply_markup = { inline_keyboard: buildInviteKeyboard(inviteLinks) };
+      }
+
+      await bot.sendMessage(chatId, responseLines.join('\n'), messageOptions);
       sessions.delete(chatId);
     } catch (error) {
       if (error instanceof VerifiedUserConflictError) {

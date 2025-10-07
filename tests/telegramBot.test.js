@@ -13,10 +13,18 @@ const onTextMock = jest.fn();
 const sendMessageMock = jest.fn();
 const answerCallbackQueryMock = jest.fn();
 const createChatInviteLinkMock = jest.fn();
+const saveVerifiedUserMock = jest.fn();
+
+class VerifiedUserConflictErrorMock extends Error {}
 
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: loggerMock,
   logger: loggerMock
+}));
+
+jest.unstable_mockModule('../src/services/verificationService.js', () => ({
+  saveVerifiedUser: saveVerifiedUserMock,
+  VerifiedUserConflictError: VerifiedUserConflictErrorMock
 }));
 
 const TelegramBotMock = jest.fn().mockImplementation(() => ({
@@ -347,5 +355,64 @@ describe('telegram polling recovery', () => {
 
     expect(stopPollingMock).toHaveBeenCalledTimes(1);
     expect(startPollingMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('telegram verification invites', () => {
+  const chatId = 25;
+  const telegramUserId = '500';
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    sendMessageMock.mockResolvedValue();
+    answerCallbackQueryMock.mockResolvedValue();
+    createChatInviteLinkMock.mockResolvedValue({ invite_link: 'https://t.me/+invite123' });
+    saveVerifiedUserMock.mockResolvedValue();
+  });
+
+  it('sends invite buttons when verification succeeds', async () => {
+    const exchanges = [{ id: 'binance', description: 'Binance' }];
+    const verifyResult = {
+      passed: true,
+      exchangeId: 'binance',
+      exchangeName: 'Binance',
+      uid: 'UID123',
+      volume: 1000,
+      volumeMet: true,
+      minimumVolume: 1000,
+      deposit: { met: true, threshold: 100, amount: 100 },
+      timestamp: '2024-01-01T00:00:00.000Z'
+    };
+
+    const volumeVerifier = {
+      getExchanges: jest.fn().mockReturnValue(exchanges),
+      verify: jest.fn().mockResolvedValue(verifyResult),
+      getExchangeConfig: jest.fn().mockReturnValue({ description: 'Binance' })
+    };
+
+    createTelegramBot({ enabled: true, token: 'token', groupIds: ['@myspace'] }, volumeVerifier);
+
+    const startHandler = onTextMock.mock.calls.find(([pattern]) => pattern.toString() === '/\\/start/i')[1];
+    await startHandler({ chat: { id: chatId }, from: { id: telegramUserId } });
+
+    const callbackHandler = onMock.mock.calls.find(([event]) => event === 'callback_query')[1];
+    await callbackHandler({
+      id: 'cb1',
+      data: 'exchange:binance',
+      message: { chat: { id: chatId }, from: { id: telegramUserId } }
+    });
+
+    const messageHandler = onMock.mock.calls.find(([event]) => event === 'message')[1];
+    await messageHandler({ chat: { id: chatId }, from: { id: telegramUserId }, text: 'UID123' });
+
+    const finalCall = sendMessageMock.mock.calls[sendMessageMock.mock.calls.length - 1];
+    expect(finalCall[0]).toEqual(chatId);
+    expect(finalCall[1]).toContain('Tap a button below to join your Telegram spaces:');
+    expect(finalCall[2]).toEqual(expect.objectContaining({
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [[{ text: 'Join @myspace', url: 'https://t.me/+invite123' }]]
+      }
+    }));
   });
 });

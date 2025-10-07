@@ -9,7 +9,8 @@
 2. The bot lists every configured exchange as inline buttons.
 3. After the user selects an exchange, the bot prompts for their UID.
 4. The verifier confirms the UID belongs to the configured affiliate programme and that the deposit requirement is met.
-5. On success, the bot creates one-time invite links for every configured Telegram group and delivers them to the user.
+5. On success, the bot creates one-time invite links for every configured Telegram group and delivers them as inline buttons
+   that open each space directly from the chat.
 
 If verification fails, the bot explains why (missing affiliate account, deposit below threshold, or API failure) and keeps
 the session open so the user can send a different UID. When a UID has already been verified for the configured influencer,

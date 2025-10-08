@@ -89,6 +89,18 @@ Transfers rotate the passkey and set the new owner ID immediately. The command r
 can be shared securely with the incoming owner, who must call `/owner register` to complete the handover. Owner actions
 write back to the `configurations` table and update the in-memory configuration for subsequent requests.
 
+## Localization
+
+The Telegram bot uses the same translation system as Discord and the HTTP API. All user-facing messages (verification status, help text, settings feedback, and owner commands) are managed through locale files in `src/i18n/locales/`.
+
+To customize Telegram responses:
+
+1. Edit `src/i18n/locales/en.json` (or create a new locale file) and update values under the `telegram` section.
+2. Preserve `{{ placeholders }}` for dynamic content like UIDs, exchange names, admin IDs, and volume thresholds.
+3. Update `config.translation.locale` or set `TRANSLATION_LOCALE` to activate the new language.
+
+This design ensures consistent multilingual support across all platforms without duplicating translation logic in each bot module.
+
 ## Deployment tips
 
 - Create the bot with [@BotFather](https://t.me/botfather) and copy the provided token into `config.json` or the

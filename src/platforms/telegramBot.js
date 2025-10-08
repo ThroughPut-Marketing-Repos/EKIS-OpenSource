@@ -12,34 +12,54 @@ const STEPS = {
 
 const GROUP_SETUP_CODE_TTL_MS = 15 * 60 * 1000;
 
-const normaliseDepositReason = (reason) => {
+const normaliseDepositReason = (reason, translator) => {
   if (!reason) {
     return null;
   }
+
+  const key = `common.verification.depositReasons.${reason}`;
+  if (translator?.t) {
+    const translated = translator.t(key);
+    if (translated && translated !== key) {
+      return translated;
+    }
+  }
+
   const text = String(reason).replace(/_/g, ' ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 };
 
-export const formatVerificationMessage = (result) => {
-  const status = result.passed ? '✅ Verification passed' : '❌ Verification failed';
-  const exchangeLabel = result.exchangeName || result.exchangeId || 'n/a';
+const ensureTranslator = (translator) => {
+  if (!translator || typeof translator.t !== 'function') {
+    throw new Error('A translator instance exposing t(key, vars) is required for Telegram localisation.');
+  }
+  return (key, vars) => translator.t(key, vars);
+};
+
+export const formatVerificationMessage = (result, translator) => {
+  const translate = ensureTranslator(translator);
+
+  const status = result.passed
+    ? translate('common.verification.status.passed')
+    : translate('common.verification.status.failed');
+  const exchangeLabel = result.exchangeName || result.exchangeId || translate('common.labels.notAvailable');
   const lines = [
     status,
-    `UID: ${result.uid}`,
-    `Exchange: ${exchangeLabel}`
+    translate('common.verification.uid', { uid: result.uid }),
+    translate('common.verification.exchange', { label: exchangeLabel })
   ];
 
   if (typeof result.volume === 'number' && !Number.isNaN(result.volume)) {
-    lines.push(`Recorded Volume: ${result.volume}`);
+    lines.push(translate('common.verification.recordedVolume', { volume: result.volume }));
     if (result.volumeMet === false) {
-      lines.push(`Volume Target: ${result.minimumVolume} (not met, informational only)`);
+      lines.push(translate('common.verification.volumeTargetNotMet', { minimum: result.minimumVolume }));
     } else if (result.volumeMet === true) {
-      lines.push(`Volume Target: ${result.minimumVolume} (met)`);
+      lines.push(translate('common.verification.volumeTargetMet', { minimum: result.minimumVolume }));
     } else if (result.skipped) {
-      lines.push(`Volume Target: ${result.minimumVolume} (tracking disabled)`);
+      lines.push(translate('common.verification.volumeTargetSkipped', { minimum: result.minimumVolume }));
     }
   } else if (result.skipped) {
-    lines.push('Trading volume tracking is currently disabled by configuration.');
+    lines.push(translate('common.verification.volumeTrackingDisabled'));
   }
 
   const depositThreshold = result.deposit?.threshold;
@@ -47,24 +67,33 @@ export const formatVerificationMessage = (result) => {
   const amount = typeof result.deposit?.amount === 'number' ? result.deposit.amount : null;
 
   if (typeof depositThreshold !== 'undefined' && depositThreshold !== null) {
-    const statusText = depositMet ? 'met' : 'not met';
+    const statusText = depositMet
+      ? translate('common.verification.depositStatus.met')
+      : translate('common.verification.depositStatus.notMet');
     if (amount !== null) {
-      lines.push(`Deposit: ${amount} / ${depositThreshold} (${statusText})`);
+      lines.push(translate('common.verification.depositSummary', {
+        amount,
+        threshold: depositThreshold,
+        status: statusText
+      }));
     } else {
-      lines.push(`Deposit Threshold: ${depositThreshold} (${statusText})`);
+      lines.push(translate('common.verification.depositThreshold', {
+        threshold: depositThreshold,
+        status: statusText
+      }));
     }
   } else if (amount !== null) {
-    lines.push(`Deposit: ${amount}`);
+    lines.push(translate('common.verification.depositAmount', { amount }));
   }
 
   if (!depositMet && result.deposit?.reason) {
-    const reasonText = normaliseDepositReason(result.deposit.reason);
+    const reasonText = normaliseDepositReason(result.deposit.reason, translator);
     if (reasonText) {
-      lines.push(`Deposit Reason: ${reasonText}`);
+      lines.push(translate('common.verification.depositReason', { reason: reasonText }));
     }
   }
 
-  lines.push(`Checked At: ${result.timestamp}`);
+  lines.push(translate('common.verification.checkedAt', { timestamp: result.timestamp }));
   return lines.join('\n');
 };
 
@@ -85,45 +114,29 @@ export const isTelegramAdmin = (telegramConfig, msg) => {
   return adminIds.includes(callerIdentifier);
 };
 
-export const buildSettingsHelp = () => [
-  'Available settings commands:',
-  '/settings volume <on|off>',
-  '/settings min_volume <amount>',
-  '/settings deposit <amount|clear>',
-  '/settings volume_days <days>',
-  '/settings volume_warning <on|off>',
-  '/settings warning_days <days>',
-  '/settings api add <name> <type> <key> <secret> [passphrase]',
-  '/settings api update <name> <type> <key> <secret> [passphrase]',
-  '/settings api remove <name>',
-  '/settings api list',
-  '/settings affiliate <exchange> <url|clear>',
-  '/settings show'
-].join('\n');
+export const buildSettingsHelp = (translator) => {
+  const translate = ensureTranslator(translator);
+  const lines = translate('telegram.settings.help');
+  return Array.isArray(lines) ? lines.join('\n') : lines;
+};
 
-export const buildOwnerHelp = () => [
-  'Owner command usage:',
-  '/owner register <passkey>',
-  '/owner add-admin <telegramUserId>',
-  '/owner remove-admin <telegramUserId>',
-  '/owner list-admins',
-  '/owner transfer-owner <telegramUserId>'
-].join('\n');
+export const buildOwnerHelp = (translator) => {
+  const translate = ensureTranslator(translator);
+  const lines = translate('telegram.owner.help');
+  return Array.isArray(lines) ? lines.join('\n') : lines;
+};
 
 /**
  * Provides a consolidated overview of the Telegram bot commands. Keep this
  * list synchronised with new commands to ensure `/help` remains accurate.
  */
-export const buildHelpMessage = () => [
-  'Available commands:',
-  '• /start – Begin the verification flow. Usage: /start',
-  '• /help – Display this command reference. Usage: /help',
-  '• /setupgroup – Link a new Telegram group or channel (admins only). Usage: /setupgroup',
-  '• /settings – Manage verification settings (admins only). Usage: /settings show',
-  '• /owner – Manage bot ownership and admin access (owner only). Usage: /owner list-admins'
-].join('\n');
+export const buildHelpMessage = (translator) => {
+  const translate = ensureTranslator(translator);
+  const lines = translate('telegram.help.commands');
+  return Array.isArray(lines) ? lines.join('\n') : lines;
+};
 
-export const normaliseBooleanFlag = (value) => {
+export const normaliseBooleanFlag = (value, translator) => {
   const normalised = String(value || '').trim().toLowerCase();
   if (['on', 'enable', 'enabled', 'true', 'yes'].includes(normalised)) {
     return true;
@@ -131,7 +144,8 @@ export const normaliseBooleanFlag = (value) => {
   if (['off', 'disable', 'disabled', 'false', 'no'].includes(normalised)) {
     return false;
   }
-  throw new Error('Boolean flag must be either on or off.');
+  const translate = ensureTranslator(translator);
+  throw new Error(translate('common.errors.booleanFlag'));
 };
 
 export const parseArgs = (text) => {
@@ -204,11 +218,12 @@ const buildInviteKeyboard = (invites) => invites.map((invite, index, all) => [{
   url: invite.link
 }]);
 
-export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerifier, configUpdater }) => async (msg, argsText) => {
+export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerifier, configUpdater, translator }) => async (msg, argsText) => {
+  const translate = ensureTranslator(translator);
   const chatId = msg.chat.id;
 
   if (!isTelegramAdmin(telegramConfig, msg)) {
-    await bot.sendMessage(chatId, 'You are not authorised to manage settings.');
+    await bot.sendMessage(chatId, translate('telegram.settings.unauthorised'));
     logger.warn('Telegram user attempted to access settings without permission.', {
       telegramUserId: msg.from?.id,
       chatId
@@ -218,7 +233,7 @@ export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerif
 
   const args = parseArgs(argsText);
   if (!args.length) {
-    await bot.sendMessage(chatId, buildSettingsHelp());
+    await bot.sendMessage(chatId, buildSettingsHelp(translator));
     return;
   }
 
@@ -228,15 +243,17 @@ export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerif
     let updatedConfig;
     switch (subcommand) {
       case 'volume': {
-        const enabled = normaliseBooleanFlag(args[0]);
+        const enabled = normaliseBooleanFlag(args[0], translator);
         updatedConfig = await configUpdater.setVolumeCheckEnabled(enabled);
-        await bot.sendMessage(chatId, `Trading volume check has been ${enabled ? 'enabled' : 'disabled'}.`);
+        await bot.sendMessage(chatId, translate(`telegram.settings.volume${enabled ? 'Enabled' : 'Disabled'}`));
         break;
       }
       case 'min_volume': {
         const amount = args[0];
         updatedConfig = await configUpdater.setMinimumVolume(amount);
-        await bot.sendMessage(chatId, `Minimum trading volume requirement updated to ${updatedConfig.verification.minimumVolume}.`);
+        await bot.sendMessage(chatId, translate('telegram.settings.minimumVolumeUpdated', {
+          amount: updatedConfig.verification.minimumVolume
+        }));
         break;
       }
       case 'deposit': {
@@ -245,26 +262,30 @@ export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerif
         updatedConfig = await configUpdater.setDepositThreshold(amount);
         const { depositThreshold } = updatedConfig.verification;
         await bot.sendMessage(chatId, depositThreshold === null
-          ? 'Deposit threshold cleared.'
-          : `Deposit threshold set to ${depositThreshold}.`);
+          ? translate('telegram.settings.depositCleared')
+          : translate('telegram.settings.depositUpdated', { amount: depositThreshold }));
         break;
       }
       case 'volume_days': {
         const days = args[0];
         updatedConfig = await configUpdater.setVolumeCheckDays(days);
-        await bot.sendMessage(chatId, `Trading volume window updated to ${updatedConfig.verification.volumeCheckDays} days.`);
+        await bot.sendMessage(chatId, translate('telegram.settings.volumeDaysUpdated', {
+          days: updatedConfig.verification.volumeCheckDays
+        }));
         break;
       }
       case 'volume_warning': {
-        const enabled = normaliseBooleanFlag(args[0]);
+        const enabled = normaliseBooleanFlag(args[0], translator);
         updatedConfig = await configUpdater.setVolumeWarningEnabled(enabled);
-        await bot.sendMessage(chatId, `Volume warning notifications have been ${enabled ? 'enabled' : 'disabled'}.`);
+        await bot.sendMessage(chatId, translate(`telegram.settings.volumeWarning${enabled ? 'Enabled' : 'Disabled'}`));
         break;
       }
       case 'warning_days': {
         const days = args[0];
         updatedConfig = await configUpdater.setVolumeWarningDays(days);
-        await bot.sendMessage(chatId, `Warning lead time updated to ${updatedConfig.verification.volumeWarningDays} days.`);
+        await bot.sendMessage(chatId, translate('telegram.settings.warningDaysUpdated', {
+          days: updatedConfig.verification.volumeWarningDays
+        }));
         break;
       }
       case 'api': {
@@ -272,7 +293,7 @@ export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerif
         if (action === 'add' || action === 'update') {
           const [name, type, apiKey, apiSecret, passphrase] = args;
           if (!name || !type || !apiKey || !apiSecret) {
-            throw new Error('Usage: /settings api add|update <name> <type> <key> <secret> [passphrase]');
+            throw new Error(translate('telegram.settings.api.usageAddUpdate'));
           }
           updatedConfig = await configUpdater.upsertExchangeCredentials({
             name,
@@ -281,64 +302,62 @@ export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerif
             apiSecret,
             passphrase
           });
-          await bot.sendMessage(chatId, `Credentials ${action === 'add' ? 'created' : 'updated'} for exchange ${name}.`);
+          await bot.sendMessage(chatId, translate(`telegram.settings.api.credentials${action === 'add' ? 'Created' : 'Updated'}`, { name }));
         } else if (action === 'remove' || action === 'delete') {
           const name = args[0];
           if (!name) {
-            throw new Error('Usage: /settings api remove <name>');
+            throw new Error(translate('telegram.settings.api.usageRemove'));
           }
           updatedConfig = await configUpdater.removeExchange(name);
-          await bot.sendMessage(chatId, `Exchange ${name} removed.`);
+          await bot.sendMessage(chatId, translate('telegram.settings.api.exchangeRemoved', { name }));
         } else if (action === 'list') {
           const exchanges = await configUpdater.listExchanges();
           if (!exchanges.length) {
-            await bot.sendMessage(chatId, 'No exchanges are configured in the database.');
+            await bot.sendMessage(chatId, translate('telegram.settings.api.listEmpty'));
           } else {
-            const lines = exchanges.map((exchange) => `• ${exchange.name} (${exchange.type || 'type unknown'})`);
-            await bot.sendMessage(chatId, ['Configured exchanges:', ...lines].join('\n'));
+            const lines = exchanges.map((exchange) => translate('telegram.settings.api.listItem', {
+              name: exchange.name,
+              type: exchange.type || translate('telegram.settings.api.typeUnknown')
+            }));
+            await bot.sendMessage(chatId, [translate('telegram.settings.api.listHeader'), ...lines].join('\n'));
           }
           return;
         } else {
-          throw new Error('Unknown api action. Use add, update, remove, or list.');
+          throw new Error(translate('telegram.settings.api.unknownAction'));
         }
         break;
       }
       case 'affiliate': {
         const name = args.shift();
-        if (!name) {
-          throw new Error('Usage: /settings affiliate <exchange> <url|clear>');
-        }
-
-        if (!args.length) {
-          throw new Error('Usage: /settings affiliate <exchange> <url|clear>');
+        if (!name || !args.length) {
+          throw new Error(translate('telegram.settings.affiliate.usage'));
         }
 
         const rawLink = args.join(' ').trim();
         const shouldClear = ['clear', 'none', 'off'].includes(rawLink.toLowerCase());
         const linkValue = shouldClear ? null : rawLink;
-
         updatedConfig = await configUpdater.setExchangeAffiliateLink(name, linkValue);
         await bot.sendMessage(chatId, linkValue
-          ? `Affiliate link for ${name} updated.`
-          : `Affiliate link for ${name} cleared.`);
+          ? translate('telegram.settings.affiliate.updated', { name })
+          : translate('telegram.settings.affiliate.cleared', { name }));
         break;
       }
       case 'show': {
         const config = await loadRuntimeConfig();
         const { verification } = config;
-        const summary = [
-          `Volume check: ${verification.volumeCheckEnabled ? 'enabled' : 'disabled'}`,
-          `Minimum volume: ${verification.minimumVolume}`,
-          `Deposit threshold: ${verification.depositThreshold ?? 'not set'}`,
-          `Volume window (days): ${verification.volumeCheckDays}`,
-          `Warning notifications: ${verification.volumeWarningEnabled !== false ? 'enabled' : 'disabled'}`,
-          `Warning lead time (days): ${verification.volumeWarningDays}`
-        ];
-        await bot.sendMessage(chatId, summary.join('\n'));
+        const summary = translate('telegram.settings.show', {
+          volumeCheck: translate(`common.states.${verification.volumeCheckEnabled ? 'enabled' : 'disabled'}`),
+          minimumVolume: verification.minimumVolume,
+          depositThreshold: verification.depositThreshold ?? translate('common.labels.notSet'),
+          volumeDays: verification.volumeCheckDays,
+          warningStatus: translate(`common.states.${verification.volumeWarningEnabled !== false ? 'enabled' : 'disabled'}`),
+          warningDays: verification.volumeWarningDays
+        });
+        await bot.sendMessage(chatId, Array.isArray(summary) ? summary.join('\n') : summary);
         return;
       }
       default:
-        await bot.sendMessage(chatId, buildSettingsHelp());
+        await bot.sendMessage(chatId, buildSettingsHelp(translator));
         return;
     }
 
@@ -351,22 +370,23 @@ export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerif
     }
   } catch (error) {
     logger.error(`Telegram settings command failed: ${error.message}`);
-    await bot.sendMessage(chatId, `Settings update failed: ${error.message}`);
+    await bot.sendMessage(chatId, translate('telegram.settings.error', { message: error.message }));
   }
 };
 
-export const createTelegramOwnerHandler = ({ bot, telegramConfig, configUpdater }) => async (msg, argsText) => {
+export const createTelegramOwnerHandler = ({ bot, telegramConfig, configUpdater, translator }) => async (msg, argsText) => {
+  const translate = ensureTranslator(translator);
   const chatId = msg.chat.id;
   const userId = msg.from?.id;
 
   if (!userId) {
-    await bot.sendMessage(chatId, 'Unable to determine your Telegram user ID.');
+    await bot.sendMessage(chatId, translate('telegram.owner.unableToDetermineUserId'));
     return;
   }
 
   const args = parseArgs(argsText);
   if (!args.length) {
-    await bot.sendMessage(chatId, buildOwnerHelp());
+    await bot.sendMessage(chatId, buildOwnerHelp(translator));
     return;
   }
 
@@ -377,21 +397,21 @@ export const createTelegramOwnerHandler = ({ bot, telegramConfig, configUpdater 
       case 'register': {
         const passkey = args[0];
         if (!passkey) {
-          await bot.sendMessage(chatId, 'Usage: /owner register <passkey>');
+          await bot.sendMessage(chatId, translate('telegram.owner.usage.register'));
           return;
         }
 
         await configUpdater.registerOwner({ platform: 'telegram', userId, passkey });
         telegramConfig.ownerId = String(userId);
         logger.info('Telegram owner registered successfully.', { telegramUserId: userId });
-        await bot.sendMessage(chatId, 'Ownership registered. You may now manage admins and transfers.');
+        await bot.sendMessage(chatId, translate('telegram.owner.registered'));
         return;
       }
       case 'add-admin': {
         await configUpdater.requireOwner('telegram', userId);
         const adminId = args[0];
         if (!adminId) {
-          await bot.sendMessage(chatId, 'Usage: /owner add-admin <telegramUserId>');
+          await bot.sendMessage(chatId, translate('telegram.owner.usage.addAdmin'));
           return;
         }
         const result = await configUpdater.addTelegramAdmin(adminId);
@@ -400,15 +420,15 @@ export const createTelegramOwnerHandler = ({ bot, telegramConfig, configUpdater 
         } else {
           telegramConfig.admins = result.admins;
         }
-        const summary = result.admins.length ? result.admins.join(', ') : 'none';
-        await bot.sendMessage(chatId, `Admin ${adminId} added. Current admins: ${summary}.`);
+        const summary = result.admins.length ? result.admins.join(', ') : translate('common.labels.none');
+        await bot.sendMessage(chatId, translate('telegram.owner.adminAdded', { adminId, summary }));
         return;
       }
       case 'remove-admin': {
         await configUpdater.requireOwner('telegram', userId);
         const adminId = args[0];
         if (!adminId) {
-          await bot.sendMessage(chatId, 'Usage: /owner remove-admin <telegramUserId>');
+          await bot.sendMessage(chatId, translate('telegram.owner.usage.removeAdmin'));
           return;
         }
         const result = await configUpdater.removeTelegramAdmin(adminId);
@@ -417,18 +437,18 @@ export const createTelegramOwnerHandler = ({ bot, telegramConfig, configUpdater 
         } else {
           telegramConfig.admins = result.admins;
         }
-        const summary = result.admins.length ? result.admins.join(', ') : 'none';
-        await bot.sendMessage(chatId, `Admin ${adminId} removed. Current admins: ${summary}.`);
+        const summary = result.admins.length ? result.admins.join(', ') : translate('common.labels.none');
+        await bot.sendMessage(chatId, translate('telegram.owner.adminRemoved', { adminId, summary }));
         return;
       }
       case 'list-admins': {
         await configUpdater.requireOwner('telegram', userId);
         const admins = await configUpdater.listTelegramAdmins();
         if (!admins.length) {
-          await bot.sendMessage(chatId, 'No Telegram admins are currently configured.');
+          await bot.sendMessage(chatId, translate('telegram.owner.listEmpty'));
         } else {
-          const lines = admins.map((admin) => `• ${admin}`);
-          await bot.sendMessage(chatId, ['Configured Telegram admins:', ...lines].join('\n'));
+          const lines = admins.map((admin) => translate('telegram.owner.listItem', { admin }));
+          await bot.sendMessage(chatId, [translate('telegram.owner.listHeader'), ...lines].join('\n'));
         }
         return;
       }
@@ -436,7 +456,7 @@ export const createTelegramOwnerHandler = ({ bot, telegramConfig, configUpdater 
         await configUpdater.requireOwner('telegram', userId);
         const targetId = args[0];
         if (!targetId) {
-          await bot.sendMessage(chatId, 'Usage: /owner transfer-owner <telegramUserId>');
+          await bot.sendMessage(chatId, translate('telegram.owner.usage.transferOwner'));
           return;
         }
         const { passkey } = await configUpdater.transferOwnership({
@@ -447,13 +467,11 @@ export const createTelegramOwnerHandler = ({ bot, telegramConfig, configUpdater 
         });
         telegramConfig.ownerId = String(targetId);
         const masked = passkey.length > 8 ? `${passkey.slice(0, 4)}…${passkey.slice(-4)}` : passkey;
-        await bot.sendMessage(chatId, [
-          `Ownership transferred to user ${targetId}.`,
-          'Share the new passkey with the incoming owner so they can register:',
-          passkey,
-          '',
-          'For production environments, communicate the passkey securely.'
-        ].join('\n'));
+        const lines = translate('telegram.owner.transfer', {
+          targetId,
+          passkey
+        });
+        await bot.sendMessage(chatId, Array.isArray(lines) ? lines.join('\n') : lines);
         logger.info('Telegram ownership transfer completed.', {
           previousOwner: userId,
           newOwner: targetId,
@@ -462,11 +480,11 @@ export const createTelegramOwnerHandler = ({ bot, telegramConfig, configUpdater 
         return;
       }
       default:
-        await bot.sendMessage(chatId, buildOwnerHelp());
+        await bot.sendMessage(chatId, buildOwnerHelp(translator));
     }
   } catch (error) {
     logger.error(`Telegram owner command failed: ${error.message}`);
-    await bot.sendMessage(chatId, `Owner command failed: ${error.message}`);
+    await bot.sendMessage(chatId, translate('telegram.owner.error', { message: error.message }));
   }
 };
 
@@ -479,6 +497,9 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
   if (!telegramConfig.token) {
     throw new Error('Telegram bot token is required when Telegram integration is enabled.');
   }
+
+  const translator = dependencies.translator;
+  const translate = ensureTranslator(translator);
 
   const bot = new TelegramBot(telegramConfig.token, { polling: true });
   // Recover gracefully from transient polling failures such as ECONNRESET by restarting the
@@ -585,13 +606,13 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
 
     if (!exchanges.length) {
       logger.warn('Telegram verification requested but no exchanges are configured.');
-      await bot.sendMessage(chatId, 'No exchanges are configured for verification at this time.');
+      await bot.sendMessage(chatId, translate('telegram.verification.noExchangesConfigured'));
       return;
     }
 
     const messageLines = [
-      'Welcome! Select the exchange you want to verify with to continue.',
-      'After selecting an exchange, send your UID so we can confirm your affiliate status and qualifying deposit.'
+      translate('telegram.verification.welcome'),
+      translate('telegram.verification.selectExchangePrompt')
     ];
 
     await bot.sendMessage(chatId, messageLines.join('\n'), {
@@ -606,7 +627,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     const uid = msg.text.trim();
 
     if (!uid) {
-      await bot.sendMessage(chatId, 'Please send a valid UID so we can continue the verification process.');
+      await bot.sendMessage(chatId, translate('telegram.verification.sendValidUid'));
       return;
     }
 
@@ -628,26 +649,26 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
           depositMet: result.deposit?.met,
           volume: result.volume
         });
-        const messageParts = [formatVerificationMessage(result), ''];
+        const messageParts = [formatVerificationMessage(result, translator), ''];
         const depositReason = result.deposit?.reason;
 
         if (depositReason === 'user_not_found') {
-          messageParts.push(`We couldn't find UID ${uid} on ${exchangeLabel}.`);
+          messageParts.push(translate('telegram.verification.userNotFound', { uid, exchange: exchangeLabel }));
           if (affiliateLink) {
-            messageParts.push('Create your account using this affiliate link, then try again:');
+            messageParts.push(translate('telegram.verification.userNotFoundAffiliate'));
             messageParts.push(affiliateLink);
           } else {
-            messageParts.push('Please register a new account using the official affiliate link, then retry verification.');
+            messageParts.push(translate('telegram.verification.userNotFoundNoAffiliate'));
           }
         } else if (depositReason === 'no deposit' || depositReason === 'deposit_not_met') {
           const thresholdText = typeof result.deposit?.threshold === 'number'
-            ? `the required deposit of ${result.deposit.threshold}`
-            : 'the required deposit';
-          messageParts.push(`We could not confirm ${thresholdText} for this UID. Please complete your deposit and try again.`);
+            ? translate('telegram.verification.depositRequirementWithAmount', { amount: result.deposit.threshold })
+            : translate('telegram.verification.depositRequirementGeneric');
+          messageParts.push(translate('telegram.verification.depositNotMet', { requirement: thresholdText }));
         } else if (depositReason === 'deposit_check_failed') {
-          messageParts.push('We could not reach the exchange to confirm your deposit. Please try again in a few minutes.');
+          messageParts.push(translate('telegram.verification.depositCheckFailed'));
         } else {
-          messageParts.push('We could not verify this UID. Please double-check the value and try again.');
+          messageParts.push(translate('telegram.verification.verificationFailed'));
         }
 
         await bot.sendMessage(chatId, messageParts.join('\n'), {
@@ -670,8 +691,8 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
             exchangeId
           });
           await bot.sendMessage(chatId, [
-            'This UID has already been verified by another account.',
-            'If you believe this is incorrect, please contact support or provide a different UID.'
+            translate('telegram.verification.alreadyVerified'),
+            translate('telegram.verification.alreadyVerifiedHelp')
           ].join('\n'));
           return;
         }
@@ -699,9 +720,9 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       }
 
       const responseLines = [
-        formatVerificationMessage(result),
+        formatVerificationMessage(result, translator),
         '',
-        '✅ You are verified!'
+        translate('telegram.verification.verified')
       ];
 
       if (telegramConfig.joinMessage) {
@@ -709,13 +730,13 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       }
 
       if (inviteLinks.length) {
-        responseLines.push('', 'Tap a button below to join your Telegram spaces:');
+        responseLines.push('', translate('telegram.verification.tapToJoin'));
       } else {
-        responseLines.push('', 'No Telegram groups are configured for automated invites. Please contact support for access.');
+        responseLines.push('', translate('telegram.verification.noGroupsConfigured'));
       }
 
       if (failedInvites.length) {
-        responseLines.push('', '⚠️ We could not create invites for the following groups:');
+        responseLines.push('', translate('telegram.verification.inviteCreationFailed'));
         failedInvites.forEach((failure) => {
           responseLines.push(`• ${failure.groupId} – ${failure.message}`);
         });
@@ -739,18 +760,18 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
         chatId,
         exchangeId
       });
-      await bot.sendMessage(chatId, `Unable to verify UID ${uid}. ${error.message}`);
+      await bot.sendMessage(chatId, translate('telegram.verification.verificationFailed', { uid, message: error.message }));
     }
   };
 
-  const handleSettingsCommand = createTelegramSettingsHandler({ bot, telegramConfig, volumeVerifier, configUpdater });
-  const handleOwnerCommand = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater });
+  const handleSettingsCommand = createTelegramSettingsHandler({ bot, telegramConfig, volumeVerifier, configUpdater, translator });
+  const handleOwnerCommand = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater, translator });
 
   const handleGroupSetupCommand = async (msg, argsText) => {
     cleanupExpiredGroupLinks();
 
     if (!isTelegramAdmin(telegramConfig, msg)) {
-      await bot.sendMessage(msg.chat.id, 'You need to be a Telegram admin to prepare group onboarding codes.');
+      await bot.sendMessage(msg.chat.id, translate('telegram.setupGroup.unauthorised'));
       logger.warn('Telegram user attempted to access /setupgroup without permission.', {
         telegramUserId: msg.from?.id,
         chatId: msg.chat?.id
@@ -760,7 +781,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
 
     const adminId = msg.from?.id;
     if (!adminId) {
-      await bot.sendMessage(msg.chat.id, 'I could not determine your Telegram user ID. Please try again.');
+      await bot.sendMessage(msg.chat.id, translate('telegram.setupGroup.unableToDetermineUserId'));
       return;
     }
 
@@ -774,13 +795,13 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
         if (msg.message_thread_id) {
           adminReplyOptions.message_thread_id = msg.message_thread_id;
         }
-        await bot.sendMessage(msg.chat.id, `Cancelled setup code ${existing.code}.`, adminReplyOptions);
+        await bot.sendMessage(msg.chat.id, translate('telegram.setupGroup.cancelled', { code: existing.code }), adminReplyOptions);
         logger.info('Telegram admin cancelled a pending group setup code.', {
           telegramUserId: adminId,
           code: existing.code
         });
       } else {
-        await bot.sendMessage(msg.chat.id, 'You do not have any active setup codes. Send /setupgroup to generate one.');
+        await bot.sendMessage(msg.chat.id, translate('telegram.setupGroup.noActiveCode'));
       }
       return;
     }
@@ -976,9 +997,9 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       chatId
     });
     await bot.sendMessage(chatId, [
-      buildHelpMessage(),
+      buildHelpMessage(translator),
       '',
-      'Use /settings or /owner without arguments to see detailed subcommand help.'
+      translate('telegram.help.detailedHelp')
     ].join('\n'));
   });
 
@@ -1014,7 +1035,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
 
     if (!selectedExchange) {
       logger.warn(`Telegram user selected unknown exchange ${exchangeId}.`, { chatId });
-      await bot.sendMessage(chatId, 'That exchange is not available. Please select one of the listed options.');
+      await bot.sendMessage(chatId, translate('telegram.verification.exchangeNotAvailable'));
       await sendExchangePrompt(chatId);
       return;
     }
@@ -1032,16 +1053,16 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     });
 
     const followUpLines = [
-      `Great choice! ${exchangeLabel} requires an eligible affiliate account.`,
-      'Please reply with the UID you would like us to verify.'
+      translate('telegram.verification.exchangeSelected', { exchange: exchangeLabel }),
+      translate('telegram.verification.sendUidInstruction')
     ];
 
     if (typeof selectedExchange.depositThreshold === 'number' && !Number.isNaN(selectedExchange.depositThreshold)) {
-      followUpLines.splice(1, 0, `Minimum deposit: ${selectedExchange.depositThreshold}`);
+      followUpLines.splice(1, 0, translate('telegram.verification.minimumDeposit', { amount: selectedExchange.depositThreshold }));
     }
 
     if (selectedExchange.affiliateLink) {
-      followUpLines.push('', `Affiliate link: ${selectedExchange.affiliateLink}`);
+      followUpLines.push('', translate('telegram.verification.affiliateLinkLabel', { link: selectedExchange.affiliateLink }));
     }
     await bot.sendMessage(chatId, followUpLines.join('\n'));
   });
@@ -1078,7 +1099,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       if (msg.text.toLowerCase().startsWith('/settings')) {
         return;
       }
-      await bot.sendMessage(chatId, 'Please send your UID to continue the verification process.');
+      await bot.sendMessage(chatId, translate('telegram.verification.sendUidPrompt'));
       return;
     }
 

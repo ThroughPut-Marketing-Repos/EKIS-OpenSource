@@ -82,6 +82,18 @@ The embed posted by the setup wizard (or via `publishVerificationEmbed`) contain
 
 All modal interactions are logged with guild, user, and exchange identifiers to aid monitoring and support.
 
+## Localization
+
+All user-facing text (verification embeds, command help, error messages, and admin responses) is managed through the translation system (`src/i18n/translator.js`). The Discord bot loads the configured locale from `config.translation.locale` and uses translation keys like `discord.verification.embed.title` to generate messages.
+
+To customize Discord responses:
+
+1. Edit `src/i18n/locales/en.json` (or your preferred locale file) and update the values under the `discord` section.
+2. Use `{{ variableName }}` placeholders to preserve dynamic content like user IDs, exchange names, and volume thresholds.
+3. Restart the bot to load the updated translations, or set `TRANSLATION_LOCALE` to switch languages without modifying files.
+
+This approach allows you to translate the entire Discord experience without touching the bot code, making it easy to support multiple communities with different languages.
+
 ## Owner workflow
 
 Ownership is established by submitting the generated passkey via `!owner register <passkey>`. The passkey is created at

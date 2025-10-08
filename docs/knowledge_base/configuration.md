@@ -12,6 +12,10 @@ environment variables. The configuration structure is:
     "passkeyGeneratedAt": null,
     "registeredAt": null
   },
+  "translation": {
+    "locale": "en",
+    "fallbackLocale": "en"
+  },
   "discord": {
     "enabled": false,
     "token": "YOUR_DISCORD_BOT_TOKEN",
@@ -70,6 +74,8 @@ environment variables override the configuration when present:
 
 | Variable | Description |
 | --- | --- |
+| `TRANSLATION_LOCALE` | Overrides `translation.locale`. Sets the primary language for user-facing messages. |
+| `TRANSLATION_FALLBACK_LOCALE` | Overrides `translation.fallbackLocale`. Used when a translation key is missing in the primary locale. |
 | `DISCORD_BOT_TOKEN` | Overrides `discord.token`. |
 | `DISCORD_APPLICATION_ID` | Overrides `discord.applicationId`. |
 | `DISCORD_GUILD_ID` | Overrides `discord.guildId`. |
@@ -155,3 +161,24 @@ The configuration also controls the automated trading volume monitor cron (`src/
 - `verification.volumeWarningEnabled` &ndash; Enables or disables pre-expiry warnings.
 - `verification.volumeWarningDays` &ndash; Sets how many days before the deadline a warning is issued.
 - `verification.volumeCheckDays` &ndash; Defines how long users have to meet the minimum trading volume requirement.
+
+## Localization and translation
+
+The `translation` section controls which language files are loaded for user-facing messages:
+
+- `translation.locale` &ndash; The primary language code (e.g., `en`, `fr`, `es`). Matches filenames in `src/i18n/locales/`.
+- `translation.fallbackLocale` &ndash; The language to use when a translation key is missing in the primary locale. Defaults to `en`.
+
+Locale files are JSON objects with nested keys representing different parts of the application (e.g., `discord.verification.embed.title`, `telegram.settings.help`). The translation system supports:
+
+- **Key-based lookups** &ndash; All user-facing strings are referenced by dot-notation keys rather than hardcoded text.
+- **Variable interpolation** &ndash; Dynamic values are inserted using `{{ variableName }}` placeholders in the translation strings.
+- **Graceful fallbacks** &ndash; Missing keys first check the fallback locale, then fall back to the key itself if unavailable.
+
+To add a new language:
+
+1. Create a new file in `src/i18n/locales/` matching the locale code (e.g., `fr.json` for French).
+2. Copy the structure from `en.json` and translate all message values while preserving the interpolation placeholders.
+3. Update `config.json` or set `TRANSLATION_LOCALE=fr` to activate the new locale.
+
+All Discord embeds, Telegram responses, and HTTP API error messages automatically use the configured locale, making it simple to provide multilingual support without code changes.

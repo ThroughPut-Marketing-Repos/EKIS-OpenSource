@@ -2,7 +2,15 @@ import express from 'express';
 import logger from '../utils/logger.js';
 import { saveVerifiedUser, VerifiedUserConflictError } from '../services/verificationService.js';
 
-const buildAuthMiddleware = (httpConfig) => (req, res, next) => {
+const ensureTranslator = (translator) => {
+  if (!translator || typeof translator.t !== 'function') {
+    throw new Error('A translator instance exposing t(key, vars) is required for HTTP localisation.');
+  }
+  return (key, vars) => translator.t(key, vars);
+};
+
+const buildAuthMiddleware = (httpConfig, translator) => (req, res, next) => {
+  const translate = ensureTranslator(translator);
   if (!httpConfig.authToken) {
     next();
     return;
@@ -10,26 +18,29 @@ const buildAuthMiddleware = (httpConfig) => (req, res, next) => {
 
   const authHeader = req.headers.authorization;
   if (!authHeader || authHeader !== `Bearer ${httpConfig.authToken}`) {
-    res.status(401).json({ error: 'Unauthorized' });
+    res.status(401).json({ error: translate('http.errors.unauthorized') });
     return;
   }
 
   next();
 };
 
-export const createHttpServer = (httpConfig, volumeVerifier) => {
+export const createHttpServer = (httpConfig, volumeVerifier, dependencies = {}) => {
   if (!httpConfig?.enabled) {
     logger.info('HTTP API disabled.');
     return null;
   }
 
+  const translator = dependencies.translator;
+  const translate = ensureTranslator(translator);
+
   const app = express();
   app.use(express.json());
 
-  const requireAuth = buildAuthMiddleware(httpConfig);
+  const requireAuth = buildAuthMiddleware(httpConfig, translator);
 
   app.get('/health', (req, res) => {
-    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+    res.json({ status: translate('http.health.status'), timestamp: new Date().toISOString() });
   });
 
   app.get('/api/exchanges', requireAuth, (req, res) => {
@@ -48,7 +59,7 @@ export const createHttpServer = (httpConfig, volumeVerifier) => {
       guildId
     } = req.body || {};
     if (!uid) {
-      res.status(400).json({ error: 'uid is required.' });
+      res.status(400).json({ error: translate('http.errors.uidRequired') });
       return;
     }
 
@@ -57,7 +68,7 @@ export const createHttpServer = (httpConfig, volumeVerifier) => {
       // Normalise the override to a finite number so downstream comparisons behave predictably.
       const parsedMinimumVolume = Number(minimumVolume);
       if (!Number.isFinite(parsedMinimumVolume)) {
-        res.status(400).json({ error: 'minimumVolume must be a finite number.' });
+        res.status(400).json({ error: translate('http.errors.minimumVolumeInvalid') });
         return;
       }
       minimumVolumeOverride = parsedMinimumVolume;
@@ -82,7 +93,7 @@ export const createHttpServer = (httpConfig, volumeVerifier) => {
               exchangeId: result.exchangeId,
               influencer: result.influencer
             });
-            res.status(409).json({ error: 'UID already verified by another account.' });
+            res.status(409).json({ error: translate('http.errors.alreadyVerified') });
             return;
           }
           throw error;
@@ -91,11 +102,11 @@ export const createHttpServer = (httpConfig, volumeVerifier) => {
       res.json(result);
     } catch (error) {
       if (error instanceof VerifiedUserConflictError) {
-        res.status(409).json({ error: 'UID already verified by another account.' });
+        res.status(409).json({ error: translate('http.errors.alreadyVerified') });
         return;
       }
       logger.warn(`HTTP verification failed: ${error.message}`);
-      res.status(400).json({ error: error.message });
+      res.status(400).json({ error: translate('http.errors.verificationFailed', { message: error.message }) });
     }
   });
 

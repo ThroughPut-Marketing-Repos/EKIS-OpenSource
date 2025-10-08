@@ -18,34 +18,47 @@ import configUpdateService from '../services/configUpdateService.js';
 import { getConfig as loadRuntimeConfig } from '../config/configManager.js';
 import { saveVerifiedUser, VerifiedUserConflictError } from '../services/verificationService.js';
 
-const normaliseDepositReason = (reason) => {
+const normaliseDepositReason = (reason, translator) => {
   if (!reason) {
     return null;
   }
+
+  const key = `common.verification.depositReasons.${reason}`;
+  if (translator?.t) {
+    const translated = translator.t(key);
+    if (translated && translated !== key) {
+      return translated;
+    }
+  }
+
   const text = String(reason).replace(/_/g, ' ');
   return text.charAt(0).toUpperCase() + text.slice(1);
 };
 
-export const formatVerificationMessage = (result) => {
-  const status = result.passed ? '✅ Verification passed' : '❌ Verification failed';
-  const exchangeLabel = result.exchangeName || result.exchangeId || 'n/a';
+export const formatVerificationMessage = (result, translator) => {
+  const translate = ensureTranslator(translator);
+
+  const status = result.passed
+    ? translate('common.verification.status.passed')
+    : translate('common.verification.status.failed');
+  const exchangeLabel = result.exchangeName || result.exchangeId || translate('common.labels.notAvailable');
   const lines = [
     status,
-    `UID: ${result.uid}`,
-    `Exchange: ${exchangeLabel}`
+    translate('common.verification.uid', { uid: result.uid }),
+    translate('common.verification.exchange', { label: exchangeLabel })
   ];
 
   if (typeof result.volume === 'number' && !Number.isNaN(result.volume)) {
-    lines.push(`Recorded Volume: ${result.volume}`);
+    lines.push(translate('common.verification.recordedVolume', { volume: result.volume }));
     if (result.volumeMet === false) {
-      lines.push(`Volume Target: ${result.minimumVolume} (not met, informational only)`);
+      lines.push(translate('common.verification.volumeTargetNotMet', { minimum: result.minimumVolume }));
     } else if (result.volumeMet === true) {
-      lines.push(`Volume Target: ${result.minimumVolume} (met)`);
+      lines.push(translate('common.verification.volumeTargetMet', { minimum: result.minimumVolume }));
     } else if (result.skipped) {
-      lines.push(`Volume Target: ${result.minimumVolume} (tracking disabled)`);
+      lines.push(translate('common.verification.volumeTargetSkipped', { minimum: result.minimumVolume }));
     }
   } else if (result.skipped) {
-    lines.push('Trading volume tracking is currently disabled by configuration.');
+    lines.push(translate('common.verification.volumeTrackingDisabled'));
   }
 
   const depositThreshold = result.deposit?.threshold;
@@ -53,24 +66,33 @@ export const formatVerificationMessage = (result) => {
   const amount = typeof result.deposit?.amount === 'number' ? result.deposit.amount : null;
 
   if (typeof depositThreshold !== 'undefined' && depositThreshold !== null) {
-    const statusText = depositMet ? 'met' : 'not met';
+    const statusText = depositMet
+      ? translate('common.verification.depositStatus.met')
+      : translate('common.verification.depositStatus.notMet');
     if (amount !== null) {
-      lines.push(`Deposit: ${amount} / ${depositThreshold} (${statusText})`);
+      lines.push(translate('common.verification.depositSummary', {
+        amount,
+        threshold: depositThreshold,
+        status: statusText
+      }));
     } else {
-      lines.push(`Deposit Threshold: ${depositThreshold} (${statusText})`);
+      lines.push(translate('common.verification.depositThreshold', {
+        threshold: depositThreshold,
+        status: statusText
+      }));
     }
   } else if (amount !== null) {
-    lines.push(`Deposit: ${amount}`);
+    lines.push(translate('common.verification.depositAmount', { amount }));
   }
 
   if (!depositMet && result.deposit?.reason) {
-    const reasonText = normaliseDepositReason(result.deposit.reason);
+    const reasonText = normaliseDepositReason(result.deposit.reason, translator);
     if (reasonText) {
-      lines.push(`Deposit Reason: ${reasonText}`);
+      lines.push(translate('common.verification.depositReason', { reason: reasonText }));
     }
   }
 
-  lines.push(`Checked At: ${result.timestamp}`);
+  lines.push(translate('common.verification.checkedAt', { timestamp: result.timestamp }));
   return lines.join('\n');
 };
 
@@ -83,6 +105,13 @@ const CREATE_CHANNEL_VALUE = 'create-channel';
 const CREATE_ROLE_VALUE = 'create-role';
 const MAX_BUTTONS_PER_ROW = 5;
 
+const ensureTranslator = (translator) => {
+  if (!translator || typeof translator.t !== 'function') {
+    throw new Error('A translator instance exposing t(key, vars) is required for Discord localisation.');
+  }
+  return (key, vars) => translator.t(key, vars);
+};
+
 const hasGuildSetupPermission = (member) => {
   if (!member?.permissions) {
     return false;
@@ -91,25 +120,31 @@ const hasGuildSetupPermission = (member) => {
     || member.permissions.has(PermissionFlagsBits.ManageGuild);
 };
 
-export const buildVerificationEmbedPayload = ({ guildName, exchanges, guildId }) => {
+export const buildVerificationEmbedPayload = ({ guildName, exchanges, guildId, translator }) => {
+  const translate = ensureTranslator(translator);
+  const descriptionLines = translate('discord.verification.embed.description');
+  const description = Array.isArray(descriptionLines) ? descriptionLines.join('\n') : descriptionLines;
   const embed = new EmbedBuilder()
-    .setTitle('Verify your exchange account')
-    .setDescription([
-      'Welcome! Use the buttons below to verify your UID for the available exchanges.',
-      'After submitting your UID you will receive a DM with the verification outcome and any follow-up actions.',
-      'If you have not registered through the affiliate link yet, please complete that step before verifying.'
-    ].join('\n'))
+    .setTitle(translate('discord.verification.embed.title'))
+    .setDescription(description)
     .setColor(0x5865F2)
-    .setFooter({ text: guildName ? `Requested by ${guildName}` : 'Exchange verification' })
+    .setFooter({
+      text: guildName
+        ? translate('discord.verification.embed.footerWithGuild', { guildName })
+        : translate('discord.verification.embed.footerDefault')
+    })
     .setTimestamp();
 
   const affiliateLines = exchanges
     .filter((exchange) => exchange.affiliateLink)
-    .map((exchange) => `• ${exchange.name || exchange.description || exchange.id}: ${exchange.affiliateLink}`);
+    .map((exchange) => translate('discord.verification.embed.affiliateLine', {
+      name: exchange.name || exchange.description || exchange.id,
+      link: exchange.affiliateLink
+    }));
 
   if (affiliateLines.length) {
     embed.addFields({
-      name: 'Affiliate links',
+      name: translate('discord.verification.embed.affiliateLinksTitle'),
       value: affiliateLines.join('\n')
     });
   }
@@ -120,7 +155,7 @@ export const buildVerificationEmbedPayload = ({ guildName, exchanges, guildId })
   if (exchanges.length === 0) {
     const button = new ButtonBuilder()
       .setCustomId(`${VERIFICATION_BUTTON_PREFIX}:disabled:${guildId || 'unknown'}`)
-      .setLabel('No exchanges configured')
+      .setLabel(translate('discord.verification.embed.noExchangesLabel'))
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(true);
     currentRow.addComponents(button);
@@ -153,21 +188,23 @@ export const buildVerificationEmbedPayload = ({ guildName, exchanges, guildId })
   };
 };
 
-export const publishVerificationEmbed = async ({ guild, channelId, volumeVerifier }) => {
+export const publishVerificationEmbed = async ({ guild, channelId, volumeVerifier, translator }) => {
+  const translate = ensureTranslator(translator);
   if (!guild || !channelId) {
-    throw new Error('A guild and channel are required to publish the verification embed.');
+    throw new Error(translate('discord.verification.embed.missingContextError'));
   }
 
   const channel = await guild.channels.fetch(channelId);
   if (!channel || channel.type !== ChannelType.GuildText) {
-    throw new Error('Verification channel must be a text channel.');
+    throw new Error(translate('discord.verification.embed.invalidChannelError'));
   }
 
   const exchanges = volumeVerifier.getExchanges ? volumeVerifier.getExchanges() : [];
   const payload = buildVerificationEmbedPayload({
     guildName: guild.name,
     guildId: guild.id,
-    exchanges
+    exchanges,
+    translator
   });
 
   await channel.send(payload);
@@ -178,7 +215,14 @@ export const publishVerificationEmbed = async ({ guild, channelId, volumeVerifie
   });
 };
 
-export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier, discordConfig, publishEmbed = publishVerificationEmbed }) => {
+export const createDiscordSetupWizard = ({
+  client,
+  configUpdater,
+  volumeVerifier,
+  discordConfig,
+  publishEmbed = publishVerificationEmbed,
+  translator
+}) => {
   const sessions = new Map();
 
   const findSession = (userId) => sessions.get(userId);
@@ -210,10 +254,11 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
     return eligible;
   };
 
-  const buildGuildMenu = (guilds) => {
+  const buildGuildMenu = (guilds, translator) => {
+    const translate = ensureTranslator(translator);
     const menu = new StringSelectMenuBuilder()
       .setCustomId(SETUP_SELECT_GUILD)
-      .setPlaceholder('Select the server to configure')
+      .setPlaceholder(translate('discord.setup.guildMenu.placeholder'))
       .addOptions(guilds.slice(0, 25).map((guild) => ({
         label: guild.name.length > 100 ? `${guild.name.slice(0, 97)}…` : guild.name,
         value: guild.id
@@ -222,10 +267,11 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
     return new ActionRowBuilder().addComponents(menu);
   };
 
-  const buildChannelMenu = (channels) => {
+  const buildChannelMenu = (channels, translator) => {
+    const translate = ensureTranslator(translator);
     const menu = new StringSelectMenuBuilder()
       .setCustomId(SETUP_SELECT_CHANNEL)
-      .setPlaceholder('Select or create the verification channel');
+      .setPlaceholder(translate('discord.setup.channelMenu.placeholder'));
 
     for (const channel of channels.slice(0, 24)) {
       menu.addOptions({
@@ -235,17 +281,18 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
     }
 
     menu.addOptions({
-      label: 'Create a new channel',
+      label: translate('discord.setup.channelMenu.createNew'),
       value: CREATE_CHANNEL_VALUE
     });
 
     return new ActionRowBuilder().addComponents(menu);
   };
 
-  const buildRoleMenu = (roles) => {
+  const buildRoleMenu = (roles, translator) => {
+    const translate = ensureTranslator(translator);
     const menu = new StringSelectMenuBuilder()
       .setCustomId(SETUP_SELECT_ROLE)
-      .setPlaceholder('Select or create the verification role');
+      .setPlaceholder(translate('discord.setup.roleMenu.placeholder'));
 
     for (const role of roles.slice(0, 24)) {
       menu.addOptions({
@@ -255,14 +302,15 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
     }
 
     menu.addOptions({
-      label: 'Create a new role',
+      label: translate('discord.setup.roleMenu.createNew'),
       value: CREATE_ROLE_VALUE
     });
 
     return new ActionRowBuilder().addComponents(menu);
   };
 
-  const promptForChannel = async (session) => {
+  const promptForChannel = async (session, translator) => {
+    const translate = ensureTranslator(translator);
     const channels = [];
     const fetched = await session.guild.channels.fetch();
     for (const channel of fetched.values()) {
@@ -272,17 +320,18 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
     }
 
     if (!channels.length) {
-      await session.dmChannel.send('No text channels available. Select the option below to create one.');
+      await session.dmChannel.send(translate('discord.setup.channelMenu.noTextChannels'));
     }
 
     await session.dmChannel.send({
-      content: 'Choose the verification channel or create a dedicated one:',
-      components: [buildChannelMenu(channels)]
+      content: translate('discord.setup.channelMenu.prompt'),
+      components: [buildChannelMenu(channels, translator)]
     });
     session.stage = 'channel';
   };
 
-  const promptForRole = async (session) => {
+  const promptForRole = async (session, translator) => {
+    const translate = ensureTranslator(translator);
     const roles = [];
     const fetched = await session.guild.roles.fetch();
     for (const role of fetched.values()) {
@@ -292,12 +341,12 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
     }
 
     if (!roles.length) {
-      await session.dmChannel.send('No suitable roles detected. Select the option below to create the verification role.');
+      await session.dmChannel.send(translate('discord.setup.roleMenu.noRoles'));
     }
 
     await session.dmChannel.send({
-      content: 'Choose the verification role or create a new one:',
-      components: [buildRoleMenu(roles)]
+      content: translate('discord.setup.roleMenu.prompt'),
+      components: [buildRoleMenu(roles, translator)]
     });
     session.stage = 'role';
   };
@@ -338,8 +387,9 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
   };
 
   const handleSetupMessage = async (message) => {
+    const translate = ensureTranslator(translator);
     if (message.guild) {
-      await message.reply('Please DM me to run the setup wizard.');
+      await message.reply(translate('discord.setup.dmPrompt'));
       return;
     }
 
@@ -347,7 +397,7 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
     const eligibleGuilds = await fetchEligibleGuilds(userId);
 
     if (!eligibleGuilds.length) {
-      await message.reply('You do not administer any servers that include this bot. Add the bot to your server and ensure you have Manage Server permissions.');
+      await message.reply(translate('discord.setup.noEligibleGuilds'));
       return;
     }
 
@@ -360,12 +410,13 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
     sessions.set(userId, session);
 
     await message.reply({
-      content: 'Let’s configure your server. Select the server you want to set up:',
-      components: [buildGuildMenu(eligibleGuilds)]
+      content: translate('discord.setup.introMessage'),
+      components: [buildGuildMenu(eligibleGuilds, translator)]
     });
   };
 
   const handleSelectMenuInteraction = async (interaction) => {
+    const translate = ensureTranslator(translator);
     if (!interaction.isStringSelectMenu()) {
       return false;
     }
@@ -379,11 +430,12 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
       const guildId = interaction.values[0];
       const guild = await client.guilds.fetch(guildId);
       session.guild = guild;
+      const content = translate('discord.setup.guildSelected', { guildName: guild.name });
       await interaction.update({
-        content: `Server selected: **${guild.name}**.`,
+        content,
         components: []
       });
-      await promptForChannel(session);
+      await promptForChannel(session, translator);
       return true;
     }
 
@@ -405,20 +457,22 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
           type: ChannelType.GuildText,
           reason: `Verification setup initiated by ${interaction.user.tag}`
         });
+        const response = translate('discord.setup.channelCreated', { channelId: channel.id });
         await interaction.update({
-          content: `Created channel <#${channel.id}> for verification.`,
+          content: response,
           components: []
         });
       } else {
         channel = await session.guild.channels.fetch(choice);
+        const response = translate('discord.setup.channelSelected', { channelId: channel.id });
         await interaction.update({
-          content: `Verification channel set to <#${channel.id}>.`,
+          content: response,
           components: []
         });
       }
 
       session.channel = channel;
-      await promptForRole(session);
+      await promptForRole(session, translator);
       return true;
     }
 
@@ -432,14 +486,16 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
           mentionable: true,
           reason: `Verification setup initiated by ${interaction.user.tag}`
         });
+        const response = translate('discord.setup.roleCreated', { roleName: role.name });
         await interaction.update({
-          content: `Created verification role **${role.name}**.`,
+          content: response,
           components: []
         });
       } else {
         role = await session.guild.roles.fetch(choice);
+        const response = translate('discord.setup.roleSelected', { roleName: role.name });
         await interaction.update({
-          content: `Verification role set to **${role.name}**.`,
+          content: response,
           components: []
         });
       }
@@ -456,12 +512,13 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
         await publishEmbed({
           guild: session.guild,
           channelId: session.channel.id,
-          volumeVerifier
+          volumeVerifier,
+          translator
         });
-        await session.dmChannel.send('Setup complete! The verification message has been posted.');
+        await session.dmChannel.send(translate('discord.setup.complete'));
       } catch (error) {
         logger.error(`Failed to publish verification embed during setup: ${error.message}`);
-        await session.dmChannel.send('Configuration saved, but the verification embed could not be posted. Please check the channel permissions and try again.');
+        await session.dmChannel.send(translate('discord.setup.embedPublishFailed'));
       } finally {
         endSession(interaction.user.id);
       }
@@ -478,10 +535,12 @@ export const createDiscordSetupWizard = ({ client, configUpdater, volumeVerifier
     } catch (error) {
       logger.error(`Discord setup wizard interaction failed: ${error.message}`);
       try {
+        const translate = ensureTranslator(translator);
+        const content = translate('discord.setup.genericError');
         if (interaction.deferred || interaction.replied) {
-          await interaction.followUp({ content: 'Something went wrong handling your selection. Please try again.', ephemeral: true });
+          await interaction.followUp({ content, ephemeral: true });
         } else {
-          await interaction.reply({ content: 'Something went wrong handling your selection. Please try again.', ephemeral: true });
+          await interaction.reply({ content, ephemeral: true });
         }
       } catch (replyError) {
         logger.error(`Failed to report setup wizard error: ${replyError.message}`);
@@ -516,43 +575,48 @@ const sendDirectMessage = async (user, content) => {
   }
 };
 
-const buildFailureResponse = ({ result, uid, exchangeLabel, affiliateLink }) => {
-  const lines = [formatVerificationMessage(result), ''];
+const buildFailureResponse = ({ result, uid, exchangeLabel, affiliateLink, translator }) => {
+  const translate = ensureTranslator(translator);
+  const lines = [formatVerificationMessage(result, translator), ''];
   const depositReason = result.deposit?.reason;
 
   if (depositReason === 'user_not_found') {
-    lines.push(`We could not find UID ${uid} on ${exchangeLabel}.`);
+    lines.push(translate('discord.verification.failure.userNotFound', {
+      uid,
+      exchange: exchangeLabel
+    }));
     if (affiliateLink) {
-      lines.push(`Register using this affiliate link, then retry: ${affiliateLink}`);
+      lines.push(translate('discord.verification.failure.userNotFoundAffiliate', { link: affiliateLink }));
     } else {
-      lines.push('Confirm you registered through the official affiliate link before trying again.');
+      lines.push(translate('discord.verification.failure.userNotFoundNoAffiliate'));
     }
   } else if (depositReason === 'no deposit' || depositReason === 'deposit_not_met') {
     const thresholdText = typeof result.deposit?.threshold === 'number'
-      ? `the required deposit of ${result.deposit.threshold}`
-      : 'the required deposit';
-    lines.push(`We could not confirm ${thresholdText}. Complete the deposit and try again.`);
+      ? translate('discord.verification.failure.depositRequirementWithAmount', { amount: result.deposit.threshold })
+      : translate('discord.verification.failure.depositRequirementGeneric');
+    lines.push(translate('discord.verification.failure.depositNotMet', { requirement: thresholdText }));
   } else if (depositReason === 'deposit_check_failed') {
-    lines.push('We could not reach the exchange to confirm your deposit. Please try again shortly.');
+    lines.push(translate('discord.verification.failure.depositCheckFailed'));
   } else {
-    lines.push('We could not verify this UID. Double-check the value and try again.');
+    lines.push(translate('discord.verification.failure.generic'));
   }
 
-  lines.push('You retain your current server access until verification succeeds.');
+  lines.push(translate('discord.verification.failure.retainAccess'));
   return lines.join('\n');
 };
 
-const buildSuccessResponse = ({ result, roleName, volumeWarningEnabled }) => {
-  const lines = [formatVerificationMessage(result)];
+const buildSuccessResponse = ({ result, roleName, volumeWarningEnabled, translator }) => {
+  const translate = ensureTranslator(translator);
+  const lines = [formatVerificationMessage(result, translator)];
 
   if (roleName) {
-    lines.push(`You have been granted the **${roleName}** role.`);
+    lines.push(translate('discord.verification.success.roleGranted', { roleName }));
   }
 
   if (result.volumeMet === false) {
-    lines.push('⚠️ Your trading volume is below the requirement. Continue trading to avoid losing access.');
+    lines.push(translate('discord.verification.success.volumeBelow'));
     if (volumeWarningEnabled !== false) {
-      lines.push('A reminder will be sent before any access changes.');
+      lines.push(translate('discord.verification.success.volumeWarningPending'));
     }
   }
 
@@ -579,51 +643,44 @@ export const isDiscordAdmin = (message, discordConfig) => {
   return false;
 };
 
-export const buildSettingsHelp = (prefix, command) => [
-  `Usage: ${prefix}${command} <subcommand>`,
-  '',
-  'Available subcommands:',
-  '- volume <on|off>',
-  '- min-volume <amount>',
-  '- deposit <amount|clear>',
-  '- volume-days <days>',
-  '- volume-warning <on|off>',
-  '- warning-days <days>',
-  '- api add <name> <type> <key> <secret> [passphrase]',
-  '- api update <name> <type> <key> <secret> [passphrase]',
-  '- api remove <name>',
-  '- api list',
-  '- affiliate <exchange> <url|clear>',
-  '- show'
-].join('\n');
+export const buildSettingsHelp = (prefix, command, translator) => {
+  const translate = ensureTranslator(translator);
+  const lines = translate('discord.settings.help', { prefix, command });
+  return Array.isArray(lines) ? lines.join('\n') : lines;
+};
 
-export const buildOwnerHelp = (prefix, command) => [
-  `Usage: ${prefix}${command} <subcommand>`,
-  '',
-  'Owner subcommands:',
-  '- register <passkey>',
-  '- add-admin <userId>',
-  '- remove-admin <userId>',
-  '- add-role <roleId>',
-  '- remove-role <roleId>',
-  '- list-admins',
-  '- transfer-owner <userId>'
-].join('\n');
+export const buildOwnerHelp = (prefix, command, translator) => {
+  const translate = ensureTranslator(translator);
+  const lines = translate('discord.owner.help', { prefix, command });
+  return Array.isArray(lines) ? lines.join('\n') : lines;
+};
 
 /**
  * Summarises the Discord bot commands and provides usage examples. Update this
  * helper whenever a new command is introduced so `help` stays current.
  */
-export const buildDiscordHelp = ({ prefix, verifyCommand, setupCommand, settingsCommand, ownerCommand, helpCommand }) => [
-  'Available commands:',
-  `• ${prefix}${verifyCommand} <uid> [exchangeId] [minimumVolume] – Verify a user and confirm their affiliate deposit. Example: ${prefix}${verifyCommand} 123456`,
-  `• ${prefix}${setupCommand} – Run the DM setup wizard to link a server, choose the verification channel, and assign the verification role. Start this command in a direct message so the bot can walk you through publishing the verification embed.`,
-  `• ${prefix}${settingsCommand} – Manage verification settings (admins only). Example: ${prefix}${settingsCommand} show`,
-  `• ${prefix}${ownerCommand} – Manage bot ownership and admin access (owner only). Example: ${prefix}${ownerCommand} list-admins`,
-  `• ${prefix}${helpCommand} – Display this command list. Example: ${prefix}${helpCommand}`
-].join('\n');
+export const buildDiscordHelp = ({
+  prefix,
+  verifyCommand,
+  setupCommand,
+  settingsCommand,
+  ownerCommand,
+  helpCommand,
+  translator
+}) => {
+  const translate = ensureTranslator(translator);
+  const lines = translate('discord.help.lines', {
+    prefix,
+    verifyCommand,
+    setupCommand,
+    settingsCommand,
+    ownerCommand,
+    helpCommand
+  });
+  return Array.isArray(lines) ? lines.join('\n') : lines;
+};
 
-export const normaliseBooleanFlag = (value) => {
+export const normaliseBooleanFlag = (value, translator) => {
   const normalised = String(value || '').trim().toLowerCase();
   if (['on', 'enable', 'enabled', 'true', 'yes'].includes(normalised)) {
     return true;
@@ -631,14 +688,23 @@ export const normaliseBooleanFlag = (value) => {
   if (['off', 'disable', 'disabled', 'false', 'no'].includes(normalised)) {
     return false;
   }
-  throw new Error('Boolean flag must be either on or off.');
+  const translate = ensureTranslator(translator);
+  throw new Error(translate('common.errors.booleanFlag'));
 };
 
 export const handleSettingsCommand = async (message, args, context) => {
-  const { discordConfig, volumeVerifier, commandPrefix, settingsCommandName, configUpdater } = context;
+  const {
+    discordConfig,
+    volumeVerifier,
+    commandPrefix,
+    settingsCommandName,
+    configUpdater,
+    translator
+  } = context;
+  const translate = ensureTranslator(translator);
 
   if (!isDiscordAdmin(message, discordConfig)) {
-    await message.reply('You are not authorised to manage bot settings.');
+    await message.reply(translate('discord.settings.unauthorised'));
     logger.warn('Discord user attempted to access settings without permission.', {
       userId: message.author?.id,
       guildId: message.guild?.id
@@ -647,7 +713,7 @@ export const handleSettingsCommand = async (message, args, context) => {
   }
 
   if (args.length === 0) {
-    await message.reply(buildSettingsHelp(commandPrefix, settingsCommandName));
+    await message.reply(buildSettingsHelp(commandPrefix, settingsCommandName, translator));
     return;
   }
 
@@ -657,15 +723,17 @@ export const handleSettingsCommand = async (message, args, context) => {
     let updatedConfig;
     switch (subcommand) {
       case 'volume': {
-        const enabled = normaliseBooleanFlag(args[0]);
+        const enabled = normaliseBooleanFlag(args[0], translator);
         updatedConfig = await configUpdater.setVolumeCheckEnabled(enabled);
-        await message.reply(`Trading volume check has been ${enabled ? 'enabled' : 'disabled'}.`);
+        await message.reply(translate(`discord.settings.volumeToggle.${enabled ? 'enabled' : 'disabled'}`));
         break;
       }
       case 'min-volume': {
         const amount = args[0];
         updatedConfig = await configUpdater.setMinimumVolume(amount);
-        await message.reply(`Minimum trading volume requirement updated to ${updatedConfig.verification.minimumVolume}.`);
+        await message.reply(translate('discord.settings.minimumVolumeUpdated', {
+          amount: updatedConfig.verification.minimumVolume
+        }));
         break;
       }
       case 'deposit': {
@@ -674,26 +742,30 @@ export const handleSettingsCommand = async (message, args, context) => {
         updatedConfig = await configUpdater.setDepositThreshold(amount);
         const { depositThreshold } = updatedConfig.verification;
         await message.reply(depositThreshold === null
-          ? 'Deposit threshold cleared.'
-          : `Deposit threshold set to ${depositThreshold}.`);
+          ? translate('discord.settings.depositCleared')
+          : translate('discord.settings.depositUpdated', { amount: depositThreshold }));
         break;
       }
       case 'volume-days': {
         const days = args[0];
         updatedConfig = await configUpdater.setVolumeCheckDays(days);
-        await message.reply(`Trading volume window updated to ${updatedConfig.verification.volumeCheckDays} days.`);
+        await message.reply(translate('discord.settings.volumeDaysUpdated', {
+          days: updatedConfig.verification.volumeCheckDays
+        }));
         break;
       }
       case 'volume-warning': {
-        const enabled = normaliseBooleanFlag(args[0]);
+        const enabled = normaliseBooleanFlag(args[0], translator);
         updatedConfig = await configUpdater.setVolumeWarningEnabled(enabled);
-        await message.reply(`Volume warning notifications have been ${enabled ? 'enabled' : 'disabled'}.`);
+        await message.reply(translate(`discord.settings.volumeWarningToggle.${enabled ? 'enabled' : 'disabled'}`));
         break;
       }
       case 'warning-days': {
         const days = args[0];
         updatedConfig = await configUpdater.setVolumeWarningDays(days);
-        await message.reply(`Warning lead time updated to ${updatedConfig.verification.volumeWarningDays} days.`);
+        await message.reply(translate('discord.settings.warningDaysUpdated', {
+          days: updatedConfig.verification.volumeWarningDays
+        }));
         break;
       }
       case 'api': {
@@ -701,7 +773,7 @@ export const handleSettingsCommand = async (message, args, context) => {
         if (action === 'add' || action === 'update') {
           const [name, type, apiKey, apiSecret, passphrase] = args;
           if (!name || !type || !apiKey || !apiSecret) {
-            throw new Error('Usage: api add|update <name> <type> <key> <secret> [passphrase]');
+            throw new Error(translate('discord.settings.api.usageAddUpdate'));
           }
           updatedConfig = await configUpdater.upsertExchangeCredentials({
             name,
@@ -710,32 +782,35 @@ export const handleSettingsCommand = async (message, args, context) => {
             apiSecret,
             passphrase
           });
-          await message.reply(`Credentials ${action === 'add' ? 'created' : 'updated'} for exchange ${name}.`);
+          await message.reply(translate(`discord.settings.api.credentials.${action === 'add' ? 'created' : 'updated'}`, { name }));
         } else if (action === 'remove' || action === 'delete') {
           const name = args[0];
           if (!name) {
-            throw new Error('Usage: api remove <name>');
+            throw new Error(translate('discord.settings.api.usageRemove'));
           }
           updatedConfig = await configUpdater.removeExchange(name);
-          await message.reply(`Exchange ${name} removed.`);
+          await message.reply(translate('discord.settings.api.exchangeRemoved', { name }));
         } else if (action === 'list') {
           const exchanges = await configUpdater.listExchanges();
           if (!exchanges.length) {
-            await message.reply('No exchanges are configured in the database.');
+            await message.reply(translate('discord.settings.api.listEmpty'));
           } else {
-            const lines = exchanges.map((exchange) => `• ${exchange.name} (${exchange.type || 'type unknown'})`);
-            await message.reply(['Configured exchanges:', ...lines].join('\n'));
+            const lines = exchanges.map((exchange) => translate('discord.settings.api.listItem', {
+              name: exchange.name,
+              type: exchange.type || translate('discord.settings.api.typeUnknown')
+            }));
+            await message.reply([translate('discord.settings.api.listHeader'), ...lines].join('\n'));
           }
           return;
         } else {
-          throw new Error('Unknown api action. Use add, update, remove, or list.');
+          throw new Error(translate('discord.settings.api.unknownAction'));
         }
         break;
       }
       case 'affiliate': {
         const name = args.shift();
         if (!name || !args.length) {
-          throw new Error('Usage: affiliate <exchange> <url|clear>');
+          throw new Error(translate('discord.settings.affiliate.usage'));
         }
 
         const rawLink = args.join(' ').trim();
@@ -743,26 +818,26 @@ export const handleSettingsCommand = async (message, args, context) => {
         const linkValue = shouldClear ? null : rawLink;
         updatedConfig = await configUpdater.setExchangeAffiliateLink(name, linkValue);
         await message.reply(linkValue
-          ? `Affiliate link for ${name} updated.`
-          : `Affiliate link for ${name} cleared.`);
+          ? translate('discord.settings.affiliate.updated', { name })
+          : translate('discord.settings.affiliate.cleared', { name }));
         break;
       }
       case 'show': {
         const config = await loadRuntimeConfig();
         const { verification } = config;
-        const summary = [
-          `Volume check: ${verification.volumeCheckEnabled ? 'enabled' : 'disabled'}`,
-          `Minimum volume: ${verification.minimumVolume}`,
-          `Deposit threshold: ${verification.depositThreshold ?? 'not set'}`,
-          `Volume window (days): ${verification.volumeCheckDays}`,
-          `Warning notifications: ${verification.volumeWarningEnabled !== false ? 'enabled' : 'disabled'}`,
-          `Warning lead time (days): ${verification.volumeWarningDays}`
-        ];
-        await message.reply(summary.join('\n'));
+        const summary = translate('discord.settings.show.lines', {
+          volumeCheck: translate(`common.states.${verification.volumeCheckEnabled ? 'enabled' : 'disabled'}`),
+          minimumVolume: verification.minimumVolume,
+          depositThreshold: verification.depositThreshold ?? translate('common.labels.notSet'),
+          volumeDays: verification.volumeCheckDays,
+          warningStatus: translate(`common.states.${verification.volumeWarningEnabled !== false ? 'enabled' : 'disabled'}`),
+          warningDays: verification.volumeWarningDays
+        });
+        await message.reply(Array.isArray(summary) ? summary.join('\n') : summary);
         return;
       }
       default:
-        await message.reply(buildSettingsHelp(commandPrefix, settingsCommandName));
+        await message.reply(buildSettingsHelp(commandPrefix, settingsCommandName, translator));
         return;
     }
 
@@ -775,157 +850,18 @@ export const handleSettingsCommand = async (message, args, context) => {
     }
   } catch (error) {
     logger.error(`Discord settings command failed: ${error.message}`);
-    await message.reply(`Settings update failed: ${error.message}`);
+    await message.reply(translate('discord.settings.error', { message: error.message }));
   }
 };
 
-export const handleOwnerCommand = async (message, args, context) => {
-  const { discordConfig, commandPrefix, ownerCommandName, configUpdater } = context;
-
-  if (args.length === 0) {
-    await message.reply(buildOwnerHelp(commandPrefix, ownerCommandName));
-    return;
-  }
-
-  const subcommand = args.shift().toLowerCase();
-
-  try {
-    if (subcommand === 'register') {
-      const passkey = args[0];
-      if (!passkey) {
-        await message.reply(`Usage: ${commandPrefix}${ownerCommandName} register <passkey>`);
-        return;
-      }
-
-      await configUpdater.registerOwner({ platform: 'discord', userId: message.author.id, passkey });
-      discordConfig.ownerId = String(message.author.id);
-      logger.info('Discord owner registered successfully.', { userId: message.author.id });
-      await message.reply('Ownership registered. You may now manage admins and ownership transfers.');
-      return;
-    }
-
-    await configUpdater.requireOwner('discord', message.author.id);
-
-    switch (subcommand) {
-      case 'add-admin': {
-        const adminId = args[0];
-        if (!adminId) {
-          await message.reply(`Usage: ${commandPrefix}${ownerCommandName} add-admin <userId>`);
-          return;
-        }
-        const result = await configUpdater.addDiscordAdminUser(adminId);
-        if (result.config?.discord) {
-          discordConfig.adminUserIds = result.config.discord.adminUserIds;
-          discordConfig.adminRoleIds = result.config.discord.adminRoleIds;
-        } else {
-          discordConfig.adminUserIds = result.userIds;
-        }
-        const summary = discordConfig.adminUserIds?.length ? discordConfig.adminUserIds.join(', ') : 'none';
-        await message.reply(`Added Discord admin user ${adminId}. Current admin users: ${summary}.`);
-        return;
-      }
-      case 'remove-admin': {
-        const adminId = args[0];
-        if (!adminId) {
-          await message.reply(`Usage: ${commandPrefix}${ownerCommandName} remove-admin <userId>`);
-          return;
-        }
-        const result = await configUpdater.removeDiscordAdminUser(adminId);
-        if (result.config?.discord) {
-          discordConfig.adminUserIds = result.config.discord.adminUserIds;
-          discordConfig.adminRoleIds = result.config.discord.adminRoleIds;
-        } else {
-          discordConfig.adminUserIds = result.userIds;
-        }
-        const summary = discordConfig.adminUserIds?.length ? discordConfig.adminUserIds.join(', ') : 'none';
-        await message.reply(`Removed Discord admin user ${adminId}. Current admin users: ${summary}.`);
-        return;
-      }
-      case 'add-role': {
-        const roleId = args[0];
-        if (!roleId) {
-          await message.reply(`Usage: ${commandPrefix}${ownerCommandName} add-role <roleId>`);
-          return;
-        }
-        const result = await configUpdater.addDiscordAdminRole(roleId);
-        if (result.config?.discord) {
-          discordConfig.adminRoleIds = result.config.discord.adminRoleIds;
-        } else {
-          discordConfig.adminRoleIds = result.roleIds;
-        }
-        const summary = discordConfig.adminRoleIds?.length ? discordConfig.adminRoleIds.join(', ') : 'none';
-        await message.reply(`Added Discord admin role ${roleId}. Current admin roles: ${summary}.`);
-        return;
-      }
-      case 'remove-role': {
-        const roleId = args[0];
-        if (!roleId) {
-          await message.reply(`Usage: ${commandPrefix}${ownerCommandName} remove-role <roleId>`);
-          return;
-        }
-        const result = await configUpdater.removeDiscordAdminRole(roleId);
-        if (result.config?.discord) {
-          discordConfig.adminRoleIds = result.config.discord.adminRoleIds;
-        } else {
-          discordConfig.adminRoleIds = result.roleIds;
-        }
-        const summary = discordConfig.adminRoleIds?.length ? discordConfig.adminRoleIds.join(', ') : 'none';
-        await message.reply(`Removed Discord admin role ${roleId}. Current admin roles: ${summary}.`);
-        return;
-      }
-      case 'list-admins': {
-        const { userIds, roleIds } = await configUpdater.listDiscordAdmins();
-        const lines = [
-          'Configured Discord admins:',
-          `Users: ${userIds.length ? userIds.join(', ') : 'none'}`,
-          `Roles: ${roleIds.length ? roleIds.join(', ') : 'none'}`
-        ];
-        await message.reply(lines.join('\n'));
-        return;
-      }
-      case 'transfer-owner': {
-        const targetId = args[0];
-        if (!targetId) {
-          await message.reply(`Usage: ${commandPrefix}${ownerCommandName} transfer-owner <userId>`);
-          return;
-        }
-        const { passkey } = await configUpdater.transferOwnership({
-          currentPlatform: 'discord',
-          currentUserId: message.author.id,
-          newOwnerId: targetId,
-          newOwnerPlatform: 'discord'
-        });
-        discordConfig.ownerId = String(targetId);
-        const masked = passkey.length > 8 ? `${passkey.slice(0, 4)}…${passkey.slice(-4)}` : passkey;
-        await message.reply([
-          `Ownership transferred to user ${targetId}.`,
-          'Share the new passkey with the incoming owner so they can register:',
-          passkey,
-          '',
-          'Communicate the passkey privately to avoid disclosure.'
-        ].join('\n'));
-        logger.info('Discord ownership transfer completed.', {
-          previousOwner: message.author.id,
-          newOwner: targetId,
-          passkeyPreview: masked
-        });
-        return;
-      }
-      default:
-        await message.reply(buildOwnerHelp(commandPrefix, ownerCommandName));
-    }
-  } catch (error) {
-    logger.error(`Discord owner command failed: ${error.message}`);
-    await message.reply(`Owner command failed: ${error.message}`);
-  }
-};
 
 export const handleVerifyCommand = async (message, args, context) => {
-  const { commandPrefix, commandName, volumeVerifier } = context;
+  const { commandPrefix, commandName, volumeVerifier, translator } = context;
+  const translate = ensureTranslator(translator);
   const [uid, exchangeId, minVolume] = args;
 
   if (!uid) {
-    await message.reply(`Usage: ${commandPrefix}${commandName} <uid> [exchangeId] [minimumVolume]`);
+    await message.reply(translate('discord.verify.usage', { prefix: commandPrefix, command: commandName }));
     return;
   }
 
@@ -933,7 +869,10 @@ export const handleVerifyCommand = async (message, args, context) => {
   if (typeof minVolume !== 'undefined') {
     const parsedMinimumVolume = Number(minVolume);
     if (!Number.isFinite(parsedMinimumVolume)) {
-      await message.reply(`Minimum volume must be a number. Usage: ${commandPrefix}${commandName} <uid> [exchangeId] [minimumVolume]`);
+      await message.reply(translate('discord.verify.minimumVolumeInvalid', {
+        prefix: commandPrefix,
+        command: commandName
+      }));
       return;
     }
     // Store the parsed override so downstream code receives a validated number instead of a NaN payload.
@@ -947,31 +886,22 @@ export const handleVerifyCommand = async (message, args, context) => {
     });
     const exchangeMeta = volumeVerifier.getExchangeConfig ? volumeVerifier.getExchangeConfig(result.exchangeId || exchangeId) : null;
     const affiliateLink = exchangeMeta?.affiliateLink || null;
-    const exchangeLabel = exchangeMeta?.description || exchangeMeta?.name || result.exchangeName || result.exchangeId || exchangeId || 'the selected exchange';
+    const exchangeLabel = exchangeMeta?.description
+      || exchangeMeta?.name
+      || result.exchangeName
+      || result.exchangeId
+      || exchangeId
+      || translate('common.labels.unknownExchange');
 
     if (!result.passed) {
-      const lines = [formatVerificationMessage(result), ''];
-      const depositReason = result.deposit?.reason;
-
-      if (depositReason === 'user_not_found') {
-        lines.push(`We couldn't find UID ${uid} on ${exchangeLabel}.`);
-        if (affiliateLink) {
-          lines.push(`Register using this affiliate link, then try again: ${affiliateLink}`);
-        } else {
-          lines.push('Please register using the official affiliate link before retrying.');
-        }
-      } else if (depositReason === 'no deposit' || depositReason === 'deposit_not_met') {
-        const thresholdText = typeof result.deposit?.threshold === 'number'
-          ? `the required deposit of ${result.deposit.threshold}`
-          : 'the required deposit';
-        lines.push(`We could not confirm ${thresholdText} for this UID. Complete your deposit and try again.`);
-      } else if (depositReason === 'deposit_check_failed') {
-        lines.push('We could not reach the exchange to confirm your deposit. Please try again shortly.');
-      } else {
-        lines.push('We could not verify this UID. Double-check the value and try again.');
-      }
-
-      await message.reply(lines.join('\n'));
+      const failureMessage = buildFailureResponse({
+        result,
+        uid,
+        exchangeLabel,
+        affiliateLink,
+        translator
+      });
+      await message.reply(failureMessage);
       return;
     }
 
@@ -989,19 +919,22 @@ export const handleVerifyCommand = async (message, args, context) => {
           discordUserId: message.author?.id,
           guildId: message.guild?.id
         });
-        await message.reply('This UID has already been verified by another account. Please supply a different UID.');
+        await message.reply(translate('discord.verify.alreadyVerified'));
         return;
       }
       throw error;
     }
 
-    await message.reply(formatVerificationMessage(result));
+    await message.reply(formatVerificationMessage(result, translator));
   } catch (error) {
     if (error instanceof VerifiedUserConflictError) {
       return;
     }
     logger.error(`Discord verification failed: ${error.message}`);
-    await message.reply(`Unable to verify UID ${uid}. ${error.message}`);
+    await message.reply(translate('discord.verify.error', {
+      uid,
+      message: error.message
+    }));
   }
 };
 
@@ -1025,6 +958,9 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
     partials: [Partials.Channel]
   });
 
+  const translator = dependencies.translator;
+  const translate = ensureTranslator(translator);
+
   const commandName = discordConfig.commandName || 'verify';
   const commandPrefix = discordConfig.commandPrefix || '!';
   const settingsCommandName = discordConfig.settingsCommandName || 'settings';
@@ -1036,7 +972,8 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
     client,
     configUpdater,
     volumeVerifier,
-    discordConfig
+    discordConfig,
+    translator
   });
 
   client.once('ready', () => {
@@ -1061,7 +998,12 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
     }
 
     if (receivedCommand === commandName) {
-      await handleVerifyCommand(message, args, { commandPrefix, commandName, volumeVerifier });
+      await handleVerifyCommand(message, args, {
+        commandPrefix,
+        commandName,
+        volumeVerifier,
+        translator
+      });
       return;
     }
 
@@ -1071,7 +1013,8 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
         volumeVerifier,
         commandPrefix,
         settingsCommandName,
-        configUpdater
+        configUpdater,
+        translator
       });
       return;
     }
@@ -1081,7 +1024,8 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
         discordConfig,
         commandPrefix,
         ownerCommandName,
-        configUpdater
+        configUpdater,
+        translator
       });
       return;
     }
@@ -1097,12 +1041,14 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
         setupCommand: setupCommandName,
         settingsCommand: settingsCommandName,
         ownerCommand: ownerCommandName,
-        helpCommand: helpCommandName
+        helpCommand: helpCommandName,
+        translator
       }));
     }
   });
 
   client.on('interactionCreate', async (interaction) => {
+    const translateInteraction = translate;
     if (await setupWizard.handleInteraction(interaction)) {
       return;
     }
@@ -1114,7 +1060,7 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
 
       if (!exchangeId || parts[1] === 'disabled') {
         await interaction.reply({
-          content: 'Verification is not available because no exchanges are configured. Please contact an administrator.',
+          content: translateInteraction('discord.modal.unavailableNoExchanges'),
           ephemeral: true
         });
         return;
@@ -1123,7 +1069,7 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
       const exchangeMeta = volumeVerifier.getExchangeConfig ? volumeVerifier.getExchangeConfig(exchangeId) : null;
       if (!exchangeMeta) {
         await interaction.reply({
-          content: 'This exchange is not currently configured. Please reach out to an administrator.',
+          content: translateInteraction('discord.modal.exchangeNotConfigured'),
           ephemeral: true
         });
         return;
@@ -1132,14 +1078,14 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
       const exchangeLabel = exchangeMeta.description || exchangeMeta.name || exchangeId;
       const modal = new ModalBuilder()
         .setCustomId(`${VERIFICATION_MODAL_PREFIX}:${guildId}:${exchangeId}`)
-        .setTitle(`${exchangeLabel} verification`)
+        .setTitle(translateInteraction('discord.modal.title', { exchange: exchangeLabel }))
         .addComponents(
           new ActionRowBuilder().addComponents(
             new TextInputBuilder()
               .setCustomId('uid')
-              .setLabel('Exchange UID')
+              .setLabel(translateInteraction('discord.modal.uidLabel'))
               .setStyle(TextInputStyle.Short)
-              .setPlaceholder('Enter your UID exactly as it appears on the exchange')
+              .setPlaceholder(translateInteraction('discord.modal.uidPlaceholder'))
               .setRequired(true)
           )
         );
@@ -1158,25 +1104,31 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
         const result = await volumeVerifier.verify(uid, { exchangeId });
         const exchangeMeta = volumeVerifier.getExchangeConfig ? volumeVerifier.getExchangeConfig(exchangeId) : null;
         const affiliateLink = exchangeMeta?.affiliateLink || null;
-        const exchangeLabel = exchangeMeta?.description || exchangeMeta?.name || result.exchangeName || exchangeId;
+        const exchangeLabel = exchangeMeta?.description
+          || exchangeMeta?.name
+          || result.exchangeName
+          || exchangeId;
 
         if (!result.passed) {
           const failureMessage = buildFailureResponse({
             result,
             uid,
             exchangeLabel,
-            affiliateLink
+            affiliateLink,
+            translator
           });
           // Attempt DM delivery first so we can fall back to the modal reply when Discord blocks DMs.
           const delivery = await sendDirectMessage(interaction.user, failureMessage);
 
           if (delivery.delivered) {
-            await interaction.editReply('Verification failed. Please check your DMs for details.');
+            await interaction.editReply(translateInteraction('discord.modal.dmFailureDelivered'));
           } else {
             const fallbackLines = [
               failureMessage,
               '',
-              `⚠️ We couldn't send a DM with this result${delivery.error ? `: ${delivery.error}` : ''}. Update your privacy settings and try again if you need another copy.`
+              translateInteraction('discord.modal.dmFailureFallback', {
+                error: delivery.error ? `: ${delivery.error}` : ''
+              })
             ];
             await interaction.editReply(fallbackLines.join('\n'));
           }
@@ -1201,7 +1153,7 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
           });
         } catch (error) {
           if (error instanceof VerifiedUserConflictError) {
-            const conflictMessage = 'This UID has already been verified by another account. Please contact support if you believe this is an error.';
+            const conflictMessage = translateInteraction('discord.verify.conflict');
             await interaction.editReply(conflictMessage);
             await sendDirectMessage(interaction.user, conflictMessage);
             return;
@@ -1243,7 +1195,8 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
         const successMessage = buildSuccessResponse({
           result,
           roleName,
-          volumeWarningEnabled
+          volumeWarningEnabled,
+          translator
         });
 
         // Deliver the detailed result privately when possible; otherwise, surface it in the modal reply.
@@ -1251,15 +1204,17 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
 
         if (delivery.delivered) {
           if (roleAssigned) {
-            await interaction.editReply('Verification successful! A confirmation has been sent to your DMs.');
+            await interaction.editReply(translateInteraction('discord.modal.successWithRole'));
           } else {
-            await interaction.editReply('Verification successful! Check your DMs for the result.');
+            await interaction.editReply(translateInteraction('discord.modal.successNoRole'));
           }
         } else {
           const fallbackLines = [
             successMessage,
             '',
-            `⚠️ We couldn't send a DM with this confirmation${delivery.error ? `: ${delivery.error}` : ''}. Review your privacy settings and keep this message for your records.`
+            translateInteraction('discord.modal.successFallback', {
+              error: delivery.error ? `: ${delivery.error}` : ''
+            })
           ];
           await interaction.editReply(fallbackLines.join('\n'));
         }
@@ -1277,7 +1232,10 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
           return;
         }
         logger.error(`Discord modal verification failed: ${error.message}`);
-        await interaction.editReply(`Unable to verify UID ${uid}. ${error.message}`);
+        await interaction.editReply(translateInteraction('discord.verify.error', {
+          uid,
+          message: error.message
+        }));
       }
     }
   });
@@ -1290,3 +1248,173 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
 };
 
 export default createDiscordBot;
+export const handleOwnerCommand = async (message, args, context) => {
+  const {
+    discordConfig,
+    commandPrefix,
+    ownerCommandName,
+    configUpdater,
+    translator
+  } = context;
+  const translate = ensureTranslator(translator);
+
+  if (args.length === 0) {
+    await message.reply(buildOwnerHelp(commandPrefix, ownerCommandName, translator));
+    return;
+  }
+
+  const subcommand = args.shift().toLowerCase();
+
+  try {
+    if (subcommand === 'register') {
+      const passkey = args[0];
+      if (!passkey) {
+        await message.reply(translate('discord.owner.usage.register', {
+          prefix: commandPrefix,
+          command: ownerCommandName
+        }));
+        return;
+      }
+
+      await configUpdater.registerOwner({ platform: 'discord', userId: message.author.id, passkey });
+      discordConfig.ownerId = String(message.author.id);
+      logger.info('Discord owner registered successfully.', { userId: message.author.id });
+      await message.reply(translate('discord.owner.registered'));
+      return;
+    }
+
+    await configUpdater.requireOwner('discord', message.author.id);
+
+    switch (subcommand) {
+      case 'add-admin': {
+        const adminId = args[0];
+        if (!adminId) {
+          await message.reply(translate('discord.owner.usage.addAdmin', {
+            prefix: commandPrefix,
+            command: ownerCommandName
+          }));
+          return;
+        }
+        const result = await configUpdater.addDiscordAdminUser(adminId);
+        if (result.config?.discord) {
+          discordConfig.adminUserIds = result.config.discord.adminUserIds;
+          discordConfig.adminRoleIds = result.config.discord.adminRoleIds;
+        } else {
+          discordConfig.adminUserIds = result.userIds;
+        }
+        const summary = discordConfig.adminUserIds?.length
+          ? discordConfig.adminUserIds.join(', ')
+          : translate('common.labels.none');
+        await message.reply(translate('discord.owner.adminAdded', { adminId, summary }));
+        return;
+      }
+      case 'remove-admin': {
+        const adminId = args[0];
+        if (!adminId) {
+          await message.reply(translate('discord.owner.usage.removeAdmin', {
+            prefix: commandPrefix,
+            command: ownerCommandName
+          }));
+          return;
+        }
+        const result = await configUpdater.removeDiscordAdminUser(adminId);
+        if (result.config?.discord) {
+          discordConfig.adminUserIds = result.config.discord.adminUserIds;
+          discordConfig.adminRoleIds = result.config.discord.adminRoleIds;
+        } else {
+          discordConfig.adminUserIds = result.userIds;
+        }
+        const summary = discordConfig.adminUserIds?.length
+          ? discordConfig.adminUserIds.join(', ')
+          : translate('common.labels.none');
+        await message.reply(translate('discord.owner.adminRemoved', { adminId, summary }));
+        return;
+      }
+      case 'add-role': {
+        const roleId = args[0];
+        if (!roleId) {
+          await message.reply(translate('discord.owner.usage.addRole', {
+            prefix: commandPrefix,
+            command: ownerCommandName
+          }));
+          return;
+        }
+        const result = await configUpdater.addDiscordAdminRole(roleId);
+        if (result.config?.discord) {
+          discordConfig.adminRoleIds = result.config.discord.adminRoleIds;
+        } else {
+          discordConfig.adminRoleIds = result.roleIds;
+        }
+        const summary = discordConfig.adminRoleIds?.length
+          ? discordConfig.adminRoleIds.join(', ')
+          : translate('common.labels.none');
+        await message.reply(translate('discord.owner.roleAdded', { roleId, summary }));
+        return;
+      }
+      case 'remove-role': {
+        const roleId = args[0];
+        if (!roleId) {
+          await message.reply(translate('discord.owner.usage.removeRole', {
+            prefix: commandPrefix,
+            command: ownerCommandName
+          }));
+          return;
+        }
+        const result = await configUpdater.removeDiscordAdminRole(roleId);
+        if (result.config?.discord) {
+          discordConfig.adminRoleIds = result.config.discord.adminRoleIds;
+        } else {
+          discordConfig.adminRoleIds = result.roleIds;
+        }
+        const summary = discordConfig.adminRoleIds?.length
+          ? discordConfig.adminRoleIds.join(', ')
+          : translate('common.labels.none');
+        await message.reply(translate('discord.owner.roleRemoved', { roleId, summary }));
+        return;
+      }
+      case 'list-admins': {
+        const { userIds, roleIds } = await configUpdater.listDiscordAdmins();
+        const lines = translate('discord.owner.list.lines', {
+          userSummary: userIds.length ? userIds.join(', ') : translate('common.labels.none'),
+          roleSummary: roleIds.length ? roleIds.join(', ') : translate('common.labels.none')
+        });
+        await message.reply(Array.isArray(lines) ? lines.join('\n') : lines);
+        return;
+      }
+      case 'transfer-owner': {
+        const targetId = args[0];
+        if (!targetId) {
+          await message.reply(translate('discord.owner.usage.transferOwner', {
+            prefix: commandPrefix,
+            command: ownerCommandName
+          }));
+          return;
+        }
+        const { passkey } = await configUpdater.transferOwnership({
+          currentPlatform: 'discord',
+          currentUserId: message.author.id,
+          newOwnerId: targetId,
+          newOwnerPlatform: 'discord'
+        });
+        discordConfig.ownerId = String(targetId);
+        const masked = passkey.length > 8 ? `${passkey.slice(0, 4)}…${passkey.slice(-4)}` : passkey;
+        const lines = translate('discord.owner.transfer.lines', {
+          targetId,
+          passkey
+        });
+        await message.reply(Array.isArray(lines) ? lines.join('\n') : lines);
+        logger.info('Discord ownership transfer completed.', {
+          previousOwner: message.author.id,
+          newOwner: targetId,
+          passkeyPreview: masked
+        });
+        return;
+      }
+      default:
+        await message.reply(buildOwnerHelp(commandPrefix, ownerCommandName, translator));
+    }
+  } catch (error) {
+    logger.error(`Discord owner command failed: ${error.message}`);
+    await message.reply(translate('discord.owner.error', { message: error.message }));
+  }
+};

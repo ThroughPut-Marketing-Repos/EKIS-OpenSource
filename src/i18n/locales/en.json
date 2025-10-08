@@ -1,0 +1,432 @@
+{
+  "common": {
+    "labels": {
+      "notAvailable": "n/a",
+      "unknownExchange": "Unknown Exchange",
+      "none": "none",
+      "notSet": "not set"
+    },
+    "states": {
+      "enabled": "enabled",
+      "disabled": "disabled"
+    },
+    "errors": {
+      "booleanFlag": "Boolean flag must be either on or off."
+    },
+    "verification": {
+      "status": {
+        "passed": "✅ Verification passed",
+        "failed": "❌ Verification failed"
+      },
+      "depositReasons": {
+        "user_not_found": "User not found",
+        "no_deposit": "No deposit",
+        "deposit_not_met": "Deposit not met",
+        "deposit_check_failed": "Deposit check failed"
+      },
+      "uid": "UID: {{ uid }}",
+      "exchange": "Exchange: {{ label }}",
+      "recordedVolume": "Recorded Volume: {{ volume }}",
+      "volumeTargetNotMet": "Volume Target: {{ minimum }} (not met, informational only)",
+      "volumeTargetMet": "Volume Target: {{ minimum }} (met)",
+      "volumeTargetSkipped": "Volume Target: {{ minimum }} (tracking disabled)",
+      "volumeTrackingDisabled": "Trading volume tracking is currently disabled by configuration.",
+      "depositStatus": {
+        "met": "met",
+        "notMet": "not met"
+      },
+      "depositSummary": "Deposit: {{ amount }} / {{ threshold }} ({{ status }})",
+      "depositThreshold": "Deposit Threshold: {{ threshold }} ({{ status }})",
+      "depositAmount": "Deposit: {{ amount }}",
+      "depositReason": "Deposit Reason: {{ reason }}",
+      "checkedAt": "Checked At: {{ timestamp }}"
+    }
+  },
+  "discord": {
+    "verification": {
+      "embed": {
+        "title": "Verify Your Account",
+        "description": [
+          "Welcome! Click the button for your exchange to verify your affiliate status.",
+          "After clicking, you'll be asked to provide your UID to confirm your qualifying deposit."
+        ],
+        "footerWithGuild": "{{ guildName }}",
+        "footerDefault": "EKIS Verification",
+        "affiliateLinksTitle": "📎 Affiliate Links",
+        "affiliateLine": "• [{{ name }}]({{ link }})",
+        "noExchangesLabel": "No Exchanges Available",
+        "missingContextError": "Guild and channel ID are required to publish verification embed.",
+        "invalidChannelError": "Target channel is not a valid text channel."
+      },
+      "failure": {
+        "userNotFound": "We couldn't find UID {{ uid }} on {{ exchange }}.",
+        "userNotFoundAffiliate": "Create your account using this affiliate link, then try again: {{ link }}",
+        "userNotFoundNoAffiliate": "Please register a new account using the official affiliate link, then retry verification.",
+        "depositRequirementWithAmount": "the required deposit of {{ amount }}",
+        "depositRequirementGeneric": "the required deposit",
+        "depositNotMet": "We could not confirm {{ requirement }} for this UID. Please complete your deposit and try again.",
+        "depositCheckFailed": "We could not reach the exchange to confirm your deposit. Please try again in a few minutes.",
+        "generic": "We could not verify this UID. Please double-check the value and try again.",
+        "retainAccess": "If you already have a verified role, you will retain access."
+      },
+      "success": {
+        "roleGranted": "You have been granted the {{ roleName }} role.",
+        "volumeBelow": "Your trading volume is currently below the target threshold.",
+        "volumeWarningPending": "We will notify you if your volume remains low closer to the next verification cycle."
+      }
+    },
+    "setup": {
+      "dmPrompt": "Please send this command in a private message so we can configure your server securely.",
+      "noEligibleGuilds": "You do not have permission to manage any servers. You need Administrator or Manage Server permissions.",
+      "introMessage": "Let's set up verification for your server! First, select which server you want to configure:",
+      "guildMenu": {
+        "placeholder": "Select a server..."
+      },
+      "guildSelected": "✓ {{ guildName }} selected. Now let's choose a verification channel.",
+      "channelMenu": {
+        "placeholder": "Select a channel...",
+        "prompt": "Which channel should host the verification embed?",
+        "noTextChannels": "Your server has no text channels available.",
+        "createNew": "➕ Create new channel"
+      },
+      "channelCreated": "✓ Created channel <#{{ channelId }}>. Now let's choose a verified role.",
+      "channelSelected": "✓ Channel <#{{ channelId }}> selected. Now let's choose a verified role.",
+      "roleMenu": {
+        "placeholder": "Select a role...",
+        "prompt": "Which role should verified members receive?",
+        "noRoles": "Your server has no assignable roles available.",
+        "createNew": "➕ Create new role"
+      },
+      "roleCreated": "✓ Created role {{ roleName }}.",
+      "roleSelected": "✓ Role {{ roleName }} selected.",
+      "complete": "🎉 Setup complete! The verification embed has been published. Verified members will receive your chosen role automatically.",
+      "embedPublishFailed": "⚠️ Setup completed but I couldn't publish the verification embed. Please check channel permissions and try running !setup again.",
+      "genericError": "Something went wrong during setup. Please try again or contact support."
+    },
+    "modal": {
+      "title": "Verify with {{ exchange }}",
+      "uidLabel": "Your UID",
+      "uidPlaceholder": "Enter your UID...",
+      "unavailableNoExchanges": "No exchanges are currently configured. Please contact an administrator.",
+      "exchangeNotConfigured": "This exchange is not configured. Please select a different exchange.",
+      "dmFailureDelivered": "Verification failed. I've sent you a DM with details.",
+      "dmFailureFallback": "Verification failed. I couldn't send you a DM{{ error }}, so here's the result:",
+      "successWithRole": "✅ Verification successful! You've been granted the verified role and sent a DM with details.",
+      "successNoRole": "✅ Verification successful! Check your DMs for details.",
+      "successFallback": "✅ Verification successful! I couldn't send you a DM{{ error }}, so here's the result:"
+    },
+    "verify": {
+      "usage": "Usage: {{ prefix }}{{ command }} <uid> [exchangeId] [minimumVolume]",
+      "minimumVolumeInvalid": "Minimum volume must be a valid number. Usage: {{ prefix }}{{ command }} <uid> [exchangeId] [minimumVolume]",
+      "alreadyVerified": "This UID has already been verified by another account. If you believe this is incorrect, please contact support or provide a different UID.",
+      "conflict": "This UID has already been verified by another account. If you believe this is incorrect, please contact support or provide a different UID.",
+      "error": "Unable to verify UID {{ uid }}. {{ message }}"
+    },
+    "settings": {
+      "unauthorised": "You are not authorised to manage settings.",
+      "help": [
+        "Available settings commands:",
+        "{{ prefix }}{{ command }} volume <on|off>",
+        "{{ prefix }}{{ command }} min-volume <amount>",
+        "{{ prefix }}{{ command }} deposit <amount|clear>",
+        "{{ prefix }}{{ command }} volume-days <days>",
+        "{{ prefix }}{{ command }} volume-warning <on|off>",
+        "{{ prefix }}{{ command }} warning-days <days>",
+        "{{ prefix }}{{ command }} api add <name> <type> <key> <secret> [passphrase]",
+        "{{ prefix }}{{ command }} api update <name> <type> <key> <secret> [passphrase]",
+        "{{ prefix }}{{ command }} api remove <name>",
+        "{{ prefix }}{{ command }} api list",
+        "{{ prefix }}{{ command }} affiliate <exchange> <url|clear>",
+        "{{ prefix }}{{ command }} show"
+      ],
+      "volumeToggle": {
+        "enabled": "Trading volume check has been enabled.",
+        "disabled": "Trading volume check has been disabled."
+      },
+      "minimumVolumeUpdated": "Minimum trading volume requirement updated to {{ amount }}.",
+      "depositCleared": "Deposit threshold cleared.",
+      "depositUpdated": "Deposit threshold set to {{ amount }}.",
+      "volumeDaysUpdated": "Trading volume window updated to {{ days }} days.",
+      "volumeWarningToggle": {
+        "enabled": "Volume warning notifications have been enabled.",
+        "disabled": "Volume warning notifications have been disabled."
+      },
+      "warningDaysUpdated": "Warning lead time updated to {{ days }} days.",
+      "api": {
+        "usageAddUpdate": "Usage: api add|update <name> <type> <key> <secret> [passphrase]",
+        "usageRemove": "Usage: api remove <name>",
+        "credentials": {
+          "created": "Credentials created for exchange {{ name }}.",
+          "updated": "Credentials updated for exchange {{ name }}."
+        },
+        "exchangeRemoved": "Exchange {{ name }} removed.",
+        "listEmpty": "No exchanges are configured in the database.",
+        "listHeader": "Configured exchanges:",
+        "listItem": "• {{ name }} ({{ type }})",
+        "typeUnknown": "type unknown",
+        "unknownAction": "Unknown api action. Use add, update, remove, or list."
+      },
+      "affiliate": {
+        "usage": "Usage: affiliate <exchange> <url|clear>",
+        "updated": "Affiliate link for {{ name }} updated.",
+        "cleared": "Affiliate link for {{ name }} cleared."
+      },
+      "show": {
+        "lines": [
+          "Volume check: {{ volumeCheck }}",
+          "Minimum volume: {{ minimumVolume }}",
+          "Deposit threshold: {{ depositThreshold }}",
+          "Volume window (days): {{ volumeDays }}",
+          "Warning notifications: {{ warningStatus }}",
+          "Warning lead time (days): {{ warningDays }}"
+        ]
+      },
+      "error": "Settings update failed: {{ message }}"
+    },
+    "owner": {
+      "help": [
+        "Owner command usage:",
+        "{{ prefix }}{{ command }} register <passkey>",
+        "{{ prefix }}{{ command }} add-admin <discordUserId>",
+        "{{ prefix }}{{ command }} remove-admin <discordUserId>",
+        "{{ prefix }}{{ command }} add-role <roleId>",
+        "{{ prefix }}{{ command }} remove-role <roleId>",
+        "{{ prefix }}{{ command }} list-admins",
+        "{{ prefix }}{{ command }} transfer-owner <discordUserId>"
+      ],
+      "usage": {
+        "register": "Usage: {{ prefix }}{{ command }} register <passkey>",
+        "addAdmin": "Usage: {{ prefix }}{{ command }} add-admin <discordUserId>",
+        "removeAdmin": "Usage: {{ prefix }}{{ command }} remove-admin <discordUserId>",
+        "addRole": "Usage: {{ prefix }}{{ command }} add-role <roleId>",
+        "removeRole": "Usage: {{ prefix }}{{ command }} remove-role <roleId>",
+        "transferOwner": "Usage: {{ prefix }}{{ command }} transfer-owner <discordUserId>"
+      },
+      "registered": "Ownership registered. You may now manage admins and transfers.",
+      "adminAdded": "Admin {{ adminId }} added. Current admins: {{ summary }}.",
+      "adminRemoved": "Admin {{ adminId }} removed. Current admins: {{ summary }}.",
+      "roleAdded": "Admin role {{ roleId }} added. Current roles: {{ summary }}.",
+      "roleRemoved": "Admin role {{ roleId }} removed. Current roles: {{ summary }}.",
+      "list": {
+        "lines": [
+          "Admin users: {{ userSummary }}",
+          "Admin roles: {{ roleSummary }}"
+        ]
+      },
+      "transfer": {
+        "lines": [
+          "Ownership transferred to user {{ targetId }}.",
+          "Share the new passkey with the incoming owner so they can register:",
+          "{{ passkey }}",
+          "",
+          "For production environments, communicate the passkey securely."
+        ]
+      },
+      "error": "Owner command failed: {{ message }}"
+    },
+    "help": {
+      "lines": [
+        "Available commands:",
+        "• {{ prefix }}{{ verifyCommand }} – Verify your affiliate account. Usage: {{ prefix }}{{ verifyCommand }} <uid> [exchange]",
+        "• {{ prefix }}{{ setupCommand }} – Set up verification for your server (admins only). Usage: {{ prefix }}{{ setupCommand }}",
+        "• {{ prefix }}{{ settingsCommand }} – Manage verification settings (admins only). Usage: {{ prefix }}{{ settingsCommand }} show",
+        "• {{ prefix }}{{ ownerCommand }} – Manage bot ownership (owner only). Usage: {{ prefix }}{{ ownerCommand }} list-admins",
+        "• {{ prefix }}{{ helpCommand }} – Display this command reference. Usage: {{ prefix }}{{ helpCommand }}"
+      ]
+    }
+  },
+  "telegram": {
+    "verification": {
+      "welcome": "Welcome! Select the exchange you want to verify with to continue.",
+      "selectExchangePrompt": "After selecting an exchange, send your UID so we can confirm your affiliate status and qualifying deposit.",
+      "noExchangesConfigured": "No exchanges are configured for verification at this time.",
+      "sendValidUid": "Please send a valid UID so we can continue the verification process.",
+      "sendUidPrompt": "Please send your UID to continue the verification process.",
+      "userNotFound": "We couldn't find UID {{ uid }} on {{ exchange }}.",
+      "userNotFoundAffiliate": "Create your account using this affiliate link, then try again:",
+      "userNotFoundNoAffiliate": "Please register a new account using the official affiliate link, then retry verification.",
+      "depositRequirementWithAmount": "the required deposit of {{ amount }}",
+      "depositRequirementGeneric": "the required deposit",
+      "depositNotMet": "We could not confirm {{ requirement }} for this UID. Please complete your deposit and try again.",
+      "depositCheckFailed": "We could not reach the exchange to confirm your deposit. Please try again in a few minutes.",
+      "verificationFailed": "We could not verify this UID. Please double-check the value and try again.",
+      "alreadyVerified": "This UID has already been verified by another account.",
+      "alreadyVerifiedHelp": "If you believe this is incorrect, please contact support or provide a different UID.",
+      "verified": "✅ You are verified!",
+      "noGroupsConfigured": "No Telegram groups are configured for automated invites. Please contact support for access.",
+      "tapToJoin": "Tap a button below to join your Telegram spaces:",
+      "inviteCreationFailed": "⚠️ We could not create invites for the following groups:",
+      "exchangeSelected": "Great choice! {{ exchange }} requires an eligible affiliate account.",
+      "minimumDeposit": "Minimum deposit: {{ amount }}",
+      "sendUidInstruction": "Please reply with the UID you would like us to verify.",
+      "affiliateLinkLabel": "Affiliate link: {{ link }}",
+      "exchangeNotAvailable": "That exchange is not available. Please select one of the listed options."
+    },
+    "settings": {
+      "unauthorised": "You are not authorised to manage settings.",
+      "help": [
+        "Available settings commands:",
+        "/settings volume <on|off>",
+        "/settings min_volume <amount>",
+        "/settings deposit <amount|clear>",
+        "/settings volume_days <days>",
+        "/settings volume_warning <on|off>",
+        "/settings warning_days <days>",
+        "/settings api add <name> <type> <key> <secret> [passphrase]",
+        "/settings api update <name> <type> <key> <secret> [passphrase]",
+        "/settings api remove <name>",
+        "/settings api list",
+        "/settings affiliate <exchange> <url|clear>",
+        "/settings show"
+      ],
+      "volumeEnabled": "Trading volume check has been enabled.",
+      "volumeDisabled": "Trading volume check has been disabled.",
+      "minimumVolumeUpdated": "Minimum trading volume requirement updated to {{ amount }}.",
+      "depositCleared": "Deposit threshold cleared.",
+      "depositUpdated": "Deposit threshold set to {{ amount }}.",
+      "volumeDaysUpdated": "Trading volume window updated to {{ days }} days.",
+      "volumeWarningEnabled": "Volume warning notifications have been enabled.",
+      "volumeWarningDisabled": "Volume warning notifications have been disabled.",
+      "warningDaysUpdated": "Warning lead time updated to {{ days }} days.",
+      "api": {
+        "usageAddUpdate": "Usage: /settings api add|update <name> <type> <key> <secret> [passphrase]",
+        "usageRemove": "Usage: /settings api remove <name>",
+        "credentialsCreated": "Credentials created for exchange {{ name }}.",
+        "credentialsUpdated": "Credentials updated for exchange {{ name }}.",
+        "exchangeRemoved": "Exchange {{ name }} removed.",
+        "listEmpty": "No exchanges are configured in the database.",
+        "listHeader": "Configured exchanges:",
+        "listItem": "• {{ name }} ({{ type }})",
+        "typeUnknown": "type unknown",
+        "unknownAction": "Unknown api action. Use add, update, remove, or list."
+      },
+      "affiliate": {
+        "usage": "Usage: /settings affiliate <exchange> <url|clear>",
+        "updated": "Affiliate link for {{ name }} updated.",
+        "cleared": "Affiliate link for {{ name }} cleared."
+      },
+      "show": [
+        "Volume check: {{ volumeCheck }}",
+        "Minimum volume: {{ minimumVolume }}",
+        "Deposit threshold: {{ depositThreshold }}",
+        "Volume window (days): {{ volumeDays }}",
+        "Warning notifications: {{ warningStatus }}",
+        "Warning lead time (days): {{ warningDays }}"
+      ],
+      "error": "Settings update failed: {{ message }}"
+    },
+    "owner": {
+      "help": [
+        "Owner command usage:",
+        "/owner register <passkey>",
+        "/owner add-admin <telegramUserId>",
+        "/owner remove-admin <telegramUserId>",
+        "/owner list-admins",
+        "/owner transfer-owner <telegramUserId>"
+      ],
+      "unableToDetermineUserId": "Unable to determine your Telegram user ID.",
+      "usage": {
+        "register": "Usage: /owner register <passkey>",
+        "addAdmin": "Usage: /owner add-admin <telegramUserId>",
+        "removeAdmin": "Usage: /owner remove-admin <telegramUserId>",
+        "transferOwner": "Usage: /owner transfer-owner <telegramUserId>"
+      },
+      "registered": "Ownership registered. You may now manage admins and transfers.",
+      "adminAdded": "Admin {{ adminId }} added. Current admins: {{ summary }}.",
+      "adminRemoved": "Admin {{ adminId }} removed. Current admins: {{ summary }}.",
+      "listEmpty": "No Telegram admins are currently configured.",
+      "listHeader": "Configured Telegram admins:",
+      "listItem": "• {{ admin }}",
+      "transfer": [
+        "Ownership transferred to user {{ targetId }}.",
+        "Share the new passkey with the incoming owner so they can register:",
+        "{{ passkey }}",
+        "",
+        "For production environments, communicate the passkey securely."
+      ],
+      "error": "Owner command failed: {{ message }}"
+    },
+    "setupGroup": {
+      "unauthorised": "You need to be a Telegram admin to prepare group onboarding codes.",
+      "unableToDetermineUserId": "I could not determine your Telegram user ID. Please try again.",
+      "cancelled": "Cancelled setup code {{ code }}.",
+      "noActiveCode": "You do not have any active setup codes. Send /setupgroup to generate one.",
+      "intro": "🚀 Telegram space onboarding assistant",
+      "instructions": [
+        "",
+        "Here is how to link a new group or channel:",
+        "1. Add this bot as an administrator in the destination with permission to create invite links.",
+        "2. Post the one-time setup code below in that space. Only you can complete the link.",
+        "3. I will reply in the group and confirm here once everything is saved.",
+        ""
+      ],
+      "oneTimeCode": "One-time setup code (valid for {{ minutes }} minutes): {{ code }}",
+      "cancelInstruction": "",
+      "cancelInstructionText": "Need to start over? Send /setupgroup cancel to invalidate this code.",
+      "postLinkingInfo": "",
+      "postLinkingInfoText": "After linking, verified members will automatically receive invite links for every saved space.",
+      "currentSpaces": "",
+      "currentSpacesHeader": "Currently linked spaces:",
+      "currentSpacesItem": "• {{ groupId }}",
+      "noSpacesLinked": "No Telegram groups or channels are linked yet.",
+      "codePostedInWrongPlace": "This setup code must be posted inside the group or channel you would like to link.",
+      "codeExpired": "This setup code has expired. Please run /setupgroup again to generate a fresh one.",
+      "codeExpiredNotification": "The setup code {{ code }} expired before it was used.",
+      "postFromPersonalAccount": "Please post the setup code from your personal account so I can confirm your admin access.",
+      "wrongSender": "Only the administrator who generated this setup code can complete the link. Ask them to post it directly.",
+      "wrongSenderNotification": [
+        "Heads up: someone attempted to use your setup code but the sender ID did not match your account.",
+        "Code: {{ code }}",
+        "The code remains active for you to reuse within the original validity window."
+      ],
+      "alreadyLinked": "ℹ️ This space is already linked. No changes were required, you can delete this code.",
+      "alreadyLinkedNotification": [
+        "This group was already on the invite list.",
+        "Identifier: {{ identifier }}"
+      ],
+      "linkSuccess": [
+        "✅ Thanks! This space is now linked to the verification flow.",
+        "Verified members will automatically receive single-use invite links here.",
+        "You can safely delete this setup code message."
+      ],
+      "linkSuccessNotification": [
+        "🎉 Group linked successfully!",
+        "• Title: {{ title }}",
+        "• Identifier: {{ identifier }}",
+        "",
+        "Invite links for verified members will now include this space automatically.",
+        "Run /setupgroup again whenever you need to add another group or channel."
+      ],
+      "linkFailed": "⚠️ I could not save this space: {{ message }}",
+      "linkFailedNotification": [
+        "⚠️ Something went wrong while saving that group.",
+        "Error: {{ message }}",
+        "",
+        "Please resolve the issue and run /setupgroup again when ready."
+      ]
+    },
+    "help": {
+      "commands": [
+        "Available commands:",
+        "• /start – Begin the verification flow. Usage: /start",
+        "• /help – Display this command reference. Usage: /help",
+        "• /setupgroup – Link a new Telegram group or channel (admins only). Usage: /setupgroup",
+        "• /settings – Manage verification settings (admins only). Usage: /settings show",
+        "• /owner – Manage bot ownership and admin access (owner only). Usage: /owner list-admins"
+      ],
+      "detailedHelp": "Use /settings or /owner without arguments to see detailed subcommand help."
+    }
+  },
+  "http": {
+    "errors": {
+      "unauthorized": "Unauthorized",
+      "uidRequired": "uid is required.",
+      "minimumVolumeInvalid": "minimumVolume must be a finite number.",
+      "alreadyVerified": "UID already verified by another account.",
+      "verificationFailed": "Verification failed: {{ message }}"
+    },
+    "health": {
+      "status": "ok"
+    }
+  }
+}

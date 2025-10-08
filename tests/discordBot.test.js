@@ -1,5 +1,7 @@
 import { jest } from '@jest/globals';
 import { ChannelType, PermissionFlagsBits } from 'discord.js';
+import { createTranslator } from '../src/i18n/translator.js';
+
 const loggerMock = {
   info: jest.fn(),
   warn: jest.fn(),
@@ -19,6 +21,9 @@ const {
   createDiscordSetupWizard,
   buildVerificationEmbedPayload
 } = await import('../src/platforms/discordBot.js');
+
+// Create a real translator instance for tests
+const translator = createTranslator({ locale: 'en', fallbackLocale: 'en' });
 
 describe('discord settings command', () => {
   const createMessage = (overrides = {}) => ({
@@ -67,10 +72,11 @@ describe('discord settings command', () => {
       volumeVerifier: { refresh: jest.fn() },
       commandPrefix: '!',
       settingsCommandName: 'settings',
-      configUpdater: {}
+      configUpdater: {},
+      translator
     });
 
-    expect(message.reply).toHaveBeenCalledWith('You are not authorised to manage bot settings.');
+    expect(message.reply).toHaveBeenCalledWith(translator.t('discord.settings.unauthorised'));
   });
 
   it('toggles volume checks for admins', async () => {
@@ -95,7 +101,8 @@ describe('discord settings command', () => {
       settingsCommandName: 'settings',
       configUpdater: {
         setVolumeCheckEnabled
-      }
+      },
+      translator
     });
 
     expect(setVolumeCheckEnabled).toHaveBeenCalledWith(false);

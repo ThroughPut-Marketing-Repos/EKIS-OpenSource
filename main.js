@@ -8,6 +8,7 @@ import logger from './src/utils/logger.js';
 import initializeDatabase from './src/database/index.js';
 import createTradingVolumeMonitor from './src/services/tradingVolumeMonitor.js';
 import { ensureOwnerPasskey, syncEnvironmentTokens } from './src/services/configUpdateService.js';
+import { createTranslator } from './src/i18n/translator.js';
 
 dotenv.config();
 
@@ -33,9 +34,15 @@ const bootstrap = async () => {
     const config = await getConfig();
     const volumeVerifier = createVolumeVerifier(config);
 
-    const discordClient = createDiscordBot(config.discord, volumeVerifier);
-    const telegramBot = createTelegramBot(config.telegram, volumeVerifier);
-    const httpServer = createHttpServer(config.http, volumeVerifier);
+    // Initialize translator with configured locale
+    const translator = createTranslator({
+      locale: config.translation?.locale || 'en',
+      fallbackLocale: config.translation?.fallbackLocale || 'en'
+    });
+
+    const discordClient = createDiscordBot(config.discord, volumeVerifier, { translator });
+    const telegramBot = createTelegramBot(config.telegram, volumeVerifier, { translator });
+    const httpServer = createHttpServer(config.http, volumeVerifier, { translator });
     const tradingVolumeMonitor = createTradingVolumeMonitor({
       discordClient,
       telegramBot

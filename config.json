@@ -1,4 +1,8 @@
 {
+  "translation": {
+    "locale": "en",
+    "fallbackLocale": "en"
+  },
   "discord": {
     "enabled": false,
     "token": "YOUR_DISCORD_BOT_TOKEN",

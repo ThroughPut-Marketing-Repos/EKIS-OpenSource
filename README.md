@@ -84,6 +84,7 @@ EKIS can be configured through `config.json`, environment variables, or a mix of
 - `discord` &mdash; enables the Discord bot and supplies the guilds, command prefixes, and bot token.
 - `telegram` &mdash; toggles the Telegram bot and defines command flows, welcome messages, and the bot token.
 - `http` &mdash; controls the HTTP API, port, and security middleware.
+- `translation` &mdash; sets the locale and fallback language for user-facing messages.
 - `exchanges` &mdash; lists each exchange provider with API credentials and default thresholds.
 - `database` &mdash; optional SQL storage for persistence and auditing.
 
@@ -94,6 +95,23 @@ production, prefer environment variables to keep secrets out of version control.
 
 All configuration keys support environment overrides using upper-case and underscore naming, e.g. `DISCORD_TOKEN` or
 `HTTP_PORT`. Review `config.json` for the expected keys and types.
+
+## Localisation
+
+EKIS supports multi-language user-facing responses through a flexible translation system:
+
+- **Locale files** &mdash; JSON translation files are stored in `src/i18n/locales/` (e.g., `en.json`, `fr.json`).
+- **Configuration** &mdash; set your preferred `locale` and `fallbackLocale` in the `translation` section of `config.json`.
+- **Environment override** &mdash; use `TRANSLATION_LOCALE` and `TRANSLATION_FALLBACK_LOCALE` to adjust the language without modifying files.
+
+The system automatically falls back to English if a translation key is missing in the selected locale. To add a new language:
+
+1. Create a new locale file in `src/i18n/locales/` (e.g., `es.json`).
+2. Copy the structure from `en.json` and translate all message keys.
+3. Update your `config.json` to set `translation.locale` to your new locale code.
+
+All user-facing strings in Discord embeds, Telegram messages, and HTTP API responses use the translation system, making it
+simple to localise the entire bot without code changes.
 
 ## Running the service
 
@@ -184,4 +202,5 @@ Comprehensive guides live under `docs/knowledge_base/`:
 - [Volume Verifier](docs/knowledge_base/volume-verifier.md)
 - [Trading Volume Monitor](docs/knowledge_base/trading-volume-monitor.md)
 
-Keep these documents in sync with the codebase whenever behaviour changes.
+Keep these documents in sync with the codebase whenever behaviour changes, and remember to update translation files when
+adding or modifying user-facing messages.

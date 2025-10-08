@@ -1,4 +1,6 @@
 import { jest } from '@jest/globals';
+import { createTranslator } from '../src/i18n/translator.js';
+
 const loggerMock = {
   info: jest.fn(),
   warn: jest.fn(),
@@ -48,6 +50,9 @@ const {
   createTelegramOwnerHandler
 } = await import('../src/platforms/telegramBot.js');
 
+// Create a real translator instance for tests
+const translator = createTranslator({ locale: 'en', fallbackLocale: 'en' });
+
 describe('telegram settings command', () => {
   let telegramConfig;
   const createMessage = (overrides = {}) => ({
@@ -75,7 +80,8 @@ describe('telegram settings command', () => {
       bot,
       telegramConfig,
       volumeVerifier: { refresh: jest.fn() },
-      configUpdater: {}
+      configUpdater: {},
+      translator
     });
 
     await handler(createMessage({ from: { id: '101' } }), 'volume off');

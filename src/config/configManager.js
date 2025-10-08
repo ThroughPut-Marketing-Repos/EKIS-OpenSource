@@ -11,6 +11,10 @@ export const defaultConfig = {
     passkeyGeneratedAt: null,
     registeredAt: null
   },
+  translation: {
+    locale: 'en',
+    fallbackLocale: 'en'
+  },
   discord: {
     enabled: false,
     token: '',
@@ -116,6 +120,10 @@ const applyEnvironmentOverrides = (config) => {
   const discordToken = process.env.DISCORD_BOT_TOKEN || process.env.DISCORD_TOKEN;
   const discordAppId = process.env.DISCORD_APPLICATION_ID || process.env.DISCORD_CLIENT_ID;
   const overrides = {
+    translation: {
+      locale: process.env.TRANSLATION_LOCALE,
+      fallbackLocale: process.env.TRANSLATION_FALLBACK_LOCALE
+    },
     discord: {
       token: discordToken,
       applicationId: discordAppId,
@@ -160,7 +168,17 @@ const validateConfig = (config) => {
     throw new Error('Configuration could not be loaded.');
   }
 
-  const { discord, telegram, http, verification } = config;
+  const { translation, discord, telegram, http, verification } = config;
+
+  if (!translation || typeof translation.locale !== 'string' || !translation.locale.trim()) {
+    throw new Error('translation.locale must be a non-empty string.');
+  }
+
+  if (typeof translation.fallbackLocale !== 'undefined' && translation.fallbackLocale !== null) {
+    if (typeof translation.fallbackLocale !== 'string' || !translation.fallbackLocale.trim()) {
+      throw new Error('translation.fallbackLocale must be a non-empty string when specified.');
+    }
+  }
   if (!discord.enabled && !telegram.enabled && !http.enabled) {
     throw new Error('At least one interface (Discord, Telegram, or HTTP API) must be enabled.');
   }

@@ -47,11 +47,23 @@ const {
   createTelegramSettingsHandler,
   createTelegramBot,
   isTelegramAdmin,
-  createTelegramOwnerHandler
+  createTelegramOwnerHandler,
+  normaliseGroupIds
 } = await import('../src/platforms/telegramBot.js');
 
 // Create a real translator instance for tests
 const translator = createTranslator({ locale: 'en', fallbackLocale: 'en' });
+
+describe('normaliseGroupIds', () => {
+  it('parses legacy JSON strings without duplicating entries', () => {
+    const result = normaliseGroupIds({
+      groupIds: ['-4910105399'],
+      groupId: '["-4910105399"]'
+    });
+
+    expect(result).toEqual(['-4910105399']);
+  });
+});
 
 describe('telegram settings command', () => {
   let telegramConfig;
@@ -108,7 +120,8 @@ describe('telegram settings command', () => {
       volumeVerifier: { refresh },
       configUpdater: {
         setVolumeCheckEnabled
-      }
+      },
+      translator
     });
 
     await handler(createMessage({ from: { id: '200' } }), 'volume off');
@@ -136,7 +149,8 @@ describe('telegram settings command', () => {
       volumeVerifier: { refresh },
       configUpdater: {
         setVolumeCheckEnabled
-      }
+      },
+      translator
     });
 
     await handler(createMessage({ from: { id: '100' } }), 'volume off');
@@ -160,7 +174,8 @@ describe('telegram settings command', () => {
       volumeVerifier: { refresh },
       configUpdater: {
         setVolumeWarningEnabled
-      }
+      },
+      translator
     });
 
     await handler(createMessage({ from: { id: '100' } }), 'volume_warning off');
@@ -183,7 +198,8 @@ describe('telegram settings command', () => {
       volumeVerifier: { refresh },
       configUpdater: {
         setVolumeWarningDays
-      }
+      },
+      translator
     });
 
     await handler(createMessage({ from: { id: '100' } }), 'warning_days 4');
@@ -212,7 +228,7 @@ describe('telegram owner command', () => {
     const configUpdater = {
       registerOwner: jest.fn().mockResolvedValue({})
     };
-    const handler = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater });
+    const handler = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater, translator });
     await handler(createMessage(), 'register secret-pass');
     expect(configUpdater.registerOwner).toHaveBeenCalledWith({
       platform: 'telegram',
@@ -232,7 +248,7 @@ describe('telegram owner command', () => {
         config: { telegram: { admins: ['300'] } }
       })
     };
-    const handler = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater });
+    const handler = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater, translator });
     await handler(createMessage(), 'add-admin 300');
     expect(configUpdater.requireOwner).toHaveBeenCalledWith('telegram', '200');
     expect(configUpdater.addTelegramAdmin).toHaveBeenCalledWith('300');
@@ -247,7 +263,7 @@ describe('telegram owner command', () => {
       addTelegramAdmin: jest.fn(),
       listTelegramAdmins: jest.fn().mockResolvedValue([])
     };
-    const handler = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater });
+    const handler = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater, translator });
     await handler(createMessage(), 'list-admins');
     expect(configUpdater.requireOwner).toHaveBeenCalledWith('telegram', '200');
     expect(bot.sendMessage).toHaveBeenCalledWith(10, 'No Telegram admins are currently configured.');
@@ -260,7 +276,7 @@ describe('telegram owner command', () => {
       addTelegramAdmin: jest.fn(),
       transferOwnership: jest.fn().mockResolvedValue({ passkey: 'next-pass' })
     };
-    const handler = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater });
+    const handler = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater, translator });
     await handler(createMessage(), 'transfer-owner 555');
     expect(configUpdater.transferOwnership).toHaveBeenCalledWith({
       currentPlatform: 'telegram',
@@ -277,7 +293,7 @@ describe('telegram owner command', () => {
       requireOwner: jest.fn().mockRejectedValue(new Error('Only the registered owner may perform this action.')),
       addTelegramAdmin: jest.fn()
     };
-    const handler = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater });
+    const handler = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater, translator });
     await handler(createMessage(), 'add-admin 400');
     expect(configUpdater.addTelegramAdmin).not.toHaveBeenCalled();
     expect(bot.sendMessage).toHaveBeenCalledWith(10, 'Owner command failed: Only the registered owner may perform this action.');
@@ -307,7 +323,7 @@ describe('telegram polling recovery', () => {
       handlers[event] = handler;
     });
 
-    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() });
+    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() }, { translator });
 
     const pollingErrorHandler = handlers.polling_error;
     expect(pollingErrorHandler).toBeDefined();
@@ -332,7 +348,7 @@ describe('telegram polling recovery', () => {
       handlers[event] = handler;
     });
 
-    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() });
+    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() }, { translator });
 
     const pollingErrorHandler = handlers.polling_error;
     pollingErrorHandler({ code: 'EFATAL', message: 'Something else' });
@@ -351,7 +367,7 @@ describe('telegram polling recovery', () => {
       handlers[event] = handler;
     });
 
-    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() });
+    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() }, { translator });
 
     const pollingErrorHandler = handlers.polling_error;
     pollingErrorHandler({ code: 'EFATAL', message: 'EFATAL: Error: read ECONNRESET' });
@@ -396,7 +412,7 @@ describe('telegram verification invites', () => {
       getExchangeConfig: jest.fn().mockReturnValue({ description: 'Binance' })
     };
 
-    createTelegramBot({ enabled: true, token: 'token', groupIds: ['@myspace'] }, volumeVerifier);
+    createTelegramBot({ enabled: true, token: 'token', groupIds: ['@myspace'] }, volumeVerifier, { translator });
 
     const startHandler = onTextMock.mock.calls.find(([pattern]) => pattern.toString() === '/\\/start/i')[1];
     await startHandler({ chat: { id: chatId }, from: { id: telegramUserId } });

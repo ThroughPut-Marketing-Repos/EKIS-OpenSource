@@ -110,3 +110,5 @@ This design ensures consistent multilingual support across all platforms without
   remote APIs.
 - Configure `telegram.groupIds` with the list of target groups (usernames such as `@mygroup` or numeric chat IDs).
   Comma-separated values are also accepted through `TELEGRAM_GROUP_ID` and database configuration.
+- Legacy deployments that stored `telegram.groupId` as JSON text (for example `"[\"-123456789\"]"`) are normalised
+  automatically, so you do not need to scrub the database manually before restarting the service.

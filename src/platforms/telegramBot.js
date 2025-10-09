@@ -156,24 +156,58 @@ export const parseArgs = (text) => {
 };
 
 // Normalises configuration so a single string or an array of identifiers can be
-// treated uniformly when generating invite links.
-const normaliseGroupIds = (telegramConfig) => {
+// treated uniformly when generating invite links. Legacy deployments stored the
+// value as JSON text inside `telegram.groupId`, so we attempt to parse and
+// sanitise those representations before falling back to comma-separated values.
+export const normaliseGroupIds = (telegramConfig) => {
   const groups = new Set();
 
+  const addGroupId = (value) => {
+    if (typeof value === 'undefined' || value === null) {
+      return;
+    }
+    const trimmed = String(value).trim();
+    if (trimmed) {
+      groups.add(trimmed);
+    }
+  };
+
   if (Array.isArray(telegramConfig?.groupIds)) {
-    telegramConfig.groupIds
-      .map((groupId) => (groupId ? String(groupId).trim() : ''))
-      .filter(Boolean)
-      .forEach((groupId) => groups.add(groupId));
+    telegramConfig.groupIds.forEach(addGroupId);
   }
 
   const rawGroupId = telegramConfig?.groupId;
-  if (rawGroupId) {
-    String(rawGroupId)
-      .split(',')
-      .map((groupId) => groupId.trim())
-      .filter(Boolean)
-      .forEach((groupId) => groups.add(groupId));
+  if (typeof rawGroupId !== 'undefined' && rawGroupId !== null) {
+    const text = String(rawGroupId).trim();
+    if (text) {
+      let parsed = false;
+
+      if (text.startsWith('[') || text.startsWith('{')) {
+        try {
+          const candidate = JSON.parse(text);
+          if (Array.isArray(candidate)) {
+            candidate.forEach(addGroupId);
+            parsed = true;
+          } else {
+            addGroupId(candidate);
+            parsed = true;
+          }
+        } catch (error) {
+          logger.warn('Unable to parse legacy Telegram group ID value as JSON.', {
+            rawGroupId: text,
+            error: error.message
+          });
+        }
+      }
+
+      if (!parsed) {
+        text
+          .split(',')
+          .map((groupId) => groupId.replace(/^[\[]+|[\]]+$/g, '').trim())
+          .map((groupId) => groupId.replace(/^['"]+|['"]+$/g, '').trim())
+          .forEach(addGroupId);
+      }
+    }
   }
 
   return Array.from(groups);

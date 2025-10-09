@@ -128,7 +128,8 @@ describe('discord settings command', () => {
       settingsCommandName: 'settings',
       configUpdater: {
         setVolumeWarningEnabled
-      }
+      },
+      translator
     });
 
     expect(setVolumeWarningEnabled).toHaveBeenCalledWith(false);
@@ -153,7 +154,8 @@ describe('discord settings command', () => {
       settingsCommandName: 'settings',
       configUpdater: {
         setVolumeWarningDays
-      }
+      },
+      translator
     });
 
     expect(setVolumeWarningDays).toHaveBeenCalledWith('5');
@@ -183,7 +185,8 @@ describe('discord settings command', () => {
       settingsCommandName: 'settings',
       configUpdater: {
         setVolumeCheckEnabled
-      }
+      },
+      translator
     });
 
     expect(setVolumeCheckEnabled).toHaveBeenCalledWith(false);
@@ -194,7 +197,7 @@ describe('discord settings command', () => {
 
 describe('discord verification embed payload', () => {
   it('builds a disabled state when no exchanges are available', () => {
-    const payload = buildVerificationEmbedPayload({ guildName: 'Guild', exchanges: [], guildId: '123' });
+    const payload = buildVerificationEmbedPayload({ guildName: 'Guild', exchanges: [], guildId: '123', translator });
     expect(payload.components).toHaveLength(1);
     expect(payload.components[0].components[0].data.disabled).toBe(true);
   });
@@ -286,7 +289,8 @@ describe('discord setup wizard', () => {
       configUpdater,
       volumeVerifier,
       discordConfig,
-      publishEmbed
+      publishEmbed,
+      translator
     });
 
     const dmChannel = { send: jest.fn().mockResolvedValue() };
@@ -308,7 +312,8 @@ describe('discord setup wizard', () => {
       update: jest.fn().mockResolvedValue()
     };
     await wizard.handleInteraction(guildSelection);
-    expect(guildSelection.update).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('Server selected') }));
+    const guildSelectedMessage = translator.t('discord.setup.guildSelected', { guildName: eligibleGuild.name });
+    expect(guildSelection.update).toHaveBeenCalledWith(expect.objectContaining({ content: guildSelectedMessage }));
     expect(dmChannel.send).toHaveBeenCalledWith(expect.objectContaining({ components: expect.any(Array) }));
 
     const channelSelection = {
@@ -337,11 +342,11 @@ describe('discord setup wizard', () => {
       verifiedRoleId: 'role-new',
       verifiedRoleName: 'Verified Member'
     });
-    expect(publishEmbed).toHaveBeenCalledWith({
+    expect(publishEmbed).toHaveBeenCalledWith(expect.objectContaining({
       guild: eligibleGuild,
       channelId: 'chan-new',
       volumeVerifier
-    });
+    }));
     expect(dmChannel.send).toHaveBeenCalledWith(expect.stringContaining('Setup complete!'));
     expect(discordConfig.guilds).toEqual([
       {
@@ -371,7 +376,8 @@ describe('discord owner command', () => {
       discordConfig,
       commandPrefix: '!',
       ownerCommandName: 'owner',
-      configUpdater
+      configUpdater,
+      translator
     });
     expect(configUpdater.registerOwner).toHaveBeenCalledWith({
       platform: 'discord',
@@ -379,7 +385,7 @@ describe('discord owner command', () => {
       passkey: 'pass-123'
     });
     expect(discordConfig.ownerId).toEqual('owner-1');
-    expect(message.reply).toHaveBeenCalledWith('Ownership registered. You may now manage admins and ownership transfers.');
+    expect(message.reply).toHaveBeenCalledWith(translator.t('discord.owner.registered'));
   });
 
   it('requires ownership before mutating admins', async () => {
@@ -397,11 +403,13 @@ describe('discord owner command', () => {
       discordConfig,
       commandPrefix: '!',
       ownerCommandName: 'owner',
-      configUpdater
+      configUpdater,
+      translator
     });
     expect(configUpdater.requireOwner).toHaveBeenCalledWith('discord', 'owner-1');
     expect(configUpdater.addDiscordAdminUser).toHaveBeenCalledWith('user-2');
-    expect(message.reply).toHaveBeenCalledWith('Added Discord admin user user-2. Current admin users: user-2.');
+    const adminAddedMessage = translator.t('discord.owner.adminAdded', { adminId: 'user-2', summary: 'user-2' });
+    expect(message.reply).toHaveBeenCalledWith(adminAddedMessage);
   });
 
   it('transfers ownership and surfaces the new passkey', async () => {
@@ -417,7 +425,8 @@ describe('discord owner command', () => {
       discordConfig,
       commandPrefix: '!',
       ownerCommandName: 'owner',
-      configUpdater
+      configUpdater,
+      translator
     });
     expect(configUpdater.transferOwnership).toHaveBeenCalledWith({
       currentPlatform: 'discord',
@@ -441,7 +450,8 @@ describe('discord owner command', () => {
       discordConfig,
       commandPrefix: '!',
       ownerCommandName: 'owner',
-      configUpdater
+      configUpdater,
+      translator
     });
     expect(configUpdater.addDiscordAdminUser).not.toHaveBeenCalled();
     expect(message.reply).toHaveBeenCalledWith('Owner command failed: Only the registered owner may perform this action.');

@@ -70,6 +70,16 @@ refresh the shared `volumeVerifier` instance so new verification requests honour
 the trading volume check is disabled, the verification responses explicitly state that the volume target is informational
 only while still performing affiliate and deposit validation.
 
+## Trading statistics
+
+Administrators (including the registered owner) can send `/stats [exchangeId|all]` to retrieve the latest trading volume
+totals captured in `VolumeSnapshot`. Without arguments the command aggregates every configured exchange, reporting the
+verified volume, number of tracked accounts, and the timestamp of the most recent snapshot. When the exchange credentials
+support exporting invitees (such as Blofin or Bitunix) an additional line surfaces the total trading volume and invitee
+count reported directly by the exchange. Providing a specific `exchangeId` limits the summary to that integration.
+Results are localised through the translation system and errors are logged with the requesting Telegram user ID for
+auditing. The command refuses to run for non-admins, aligning with the behaviour of other maintenance tools.
+
 ## Owner workflow
 
 When the service starts it generates a one-time owner passkey if none exists. The passkey is logged with a masked preview

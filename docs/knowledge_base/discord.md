@@ -72,6 +72,17 @@ Available subcommands:
 Each mutating subcommand persists changes via `configUpdateService`, refreshes the in-memory configuration cache, and
 reloads the `volumeVerifier` instance so subsequent verification requests immediately respect the latest settings.
 
+## Trading statistics
+
+Authorised administrators can run `!stats [exchangeId|all]` (or the configured `discord.statsCommandName`) to inspect the
+latest trading volume totals persisted in the `VolumeSnapshot` table. The bot aggregates the newest snapshot for every
+tracked UID, summarising verified volume, account counts, and the timestamp of the most recent update. When exchange
+credentials support invitee exports (for example Blofin or Bitunix), the response also includes the total trading
+volume and invitee count reported by the exchange itself. Passing an `exchangeId` limits the summary to a single
+integration, while omitting arguments reports across all exchanges. Results are translated using the configured locale
+and failure scenarios surface descriptive errors alongside structured logs so operators can troubleshoot missing
+snapshots or permissions. Non-admin users receive the same unauthorised response used by the settings command.
+
 ## Interactive verification
 
 The embed posted by the setup wizard (or via `publishVerificationEmbed`) contains one button per configured exchange. Clicking a button launches a modal that collects the UID and executes the same verification logic used by the text command. Responses behave as follows:

@@ -183,6 +183,24 @@
       },
       "error": "Settings update failed: {{ message }}"
     },
+    "stats": {
+      "unauthorised": "You are not authorised to view trading statistics.",
+      "usage": "Usage: {{ prefix }}{{ command }} [exchangeId|all]",
+      "unknownExchange": "Exchange {{ exchange }} is not configured.",
+      "scopeAll": "all exchanges",
+      "header": "📊 Trading volume statistics ({{ scope }})",
+      "lastUpdated": "latest snapshot: {{ timestamp }}",
+      "lastUpdatedUnknown": "latest snapshot: n/a",
+      "exchangeLine": "• {{ name }} – Verified: {{ verifiedVolume }} across {{ accounts }} accounts ({{ lastUpdated }})\n  Exchange total: {{ exchangeVolume }} across {{ invitees }} invitees ({{ exchangeRefreshed }})",
+      "overallLine": "Verified total across {{ accounts }} accounts: {{ volume }}",
+      "overallExchangeLine": "Exchange reported volume ({{ exchanges }} exchanges): {{ volume }} across {{ invitees }} invitees",
+      "exchangeTotalUnavailable": "n/a",
+      "exchangeInviteesUnknown": "unknown",
+      "exchangeRefreshed": "fetched at {{ timestamp }}",
+      "exchangeRefreshedUnknown": "timestamp unavailable",
+      "noData": "No trading volume snapshots are available for {{ scope }}.",
+      "error": "Unable to load trading statistics: {{ message }}"
+    },
     "owner": {
       "help": [
         "Owner command usage:",
@@ -230,6 +248,7 @@
         "• {{ prefix }}{{ verifyCommand }} – Verify your affiliate account. Usage: {{ prefix }}{{ verifyCommand }} <uid> [exchange]",
         "• {{ prefix }}{{ setupCommand }} – Set up verification for your server (admins only). Usage: {{ prefix }}{{ setupCommand }}",
         "• {{ prefix }}{{ settingsCommand }} – Manage verification settings (admins only). Usage: {{ prefix }}{{ settingsCommand }} show",
+        "• {{ prefix }}{{ statsCommand }} – Display trading statistics (admins only). Usage: {{ prefix }}{{ statsCommand }} [exchange|all]",
         "• {{ prefix }}{{ ownerCommand }} – Manage bot ownership (owner only). Usage: {{ prefix }}{{ ownerCommand }} list-admins",
         "• {{ prefix }}{{ helpCommand }} – Display this command reference. Usage: {{ prefix }}{{ helpCommand }}"
       ]
@@ -314,6 +333,24 @@
         "Warning lead time (days): {{ warningDays }}"
       ],
       "error": "Settings update failed: {{ message }}"
+    },
+    "stats": {
+      "unauthorised": "You are not authorised to view trading statistics.",
+      "usage": "Usage: /stats [exchangeId|all]",
+      "unknownExchange": "Exchange {{ exchange }} is not configured.",
+      "scopeAll": "all exchanges",
+      "header": "📊 Trading volume statistics ({{ scope }})",
+      "lastUpdated": "latest snapshot: {{ timestamp }}",
+      "lastUpdatedUnknown": "latest snapshot: n/a",
+      "exchangeLine": "• {{ name }} – Verified: {{ verifiedVolume }} across {{ accounts }} accounts ({{ lastUpdated }})\n  Exchange total: {{ exchangeVolume }} across {{ invitees }} invitees ({{ exchangeRefreshed }})",
+      "overallLine": "Verified total across {{ accounts }} accounts: {{ volume }}",
+      "overallExchangeLine": "Exchange reported volume ({{ exchanges }} exchanges): {{ volume }} across {{ invitees }} invitees",
+      "exchangeTotalUnavailable": "n/a",
+      "exchangeInviteesUnknown": "unknown",
+      "exchangeRefreshed": "fetched at {{ timestamp }}",
+      "exchangeRefreshedUnknown": "timestamp unavailable",
+      "noData": "No trading volume snapshots are available for {{ scope }}.",
+      "error": "Unable to load trading statistics: {{ message }}"
     },
     "owner": {
       "help": [
@@ -412,6 +449,7 @@
         "• /help – Display this command reference. Usage: /help",
         "• /setupgroup – Link a new Telegram group or channel (admins only). Usage: /setupgroup",
         "• /settings – Manage verification settings (admins only). Usage: /settings show",
+        "• /stats – Display trading volume statistics (admins only). Usage: /stats [exchange|all]",
         "• /owner – Manage bot ownership and admin access (owner only). Usage: /owner list-admins"
       ],
       "detailedHelp": "Use /settings or /owner without arguments to see detailed subcommand help."

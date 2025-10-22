@@ -17,6 +17,7 @@ import logger from '../utils/logger.js';
 import configUpdateService from '../services/configUpdateService.js';
 import { getConfig as loadRuntimeConfig } from '../config/configManager.js';
 import { saveVerifiedUser, VerifiedUserConflictError } from '../services/verificationService.js';
+import statisticsService from '../services/statisticsService.js';
 
 const normaliseDepositReason = (reason, translator) => {
   if (!reason) {
@@ -664,6 +665,7 @@ export const buildDiscordHelp = ({
   verifyCommand,
   setupCommand,
   settingsCommand,
+  statsCommand,
   ownerCommand,
   helpCommand,
   translator
@@ -674,6 +676,7 @@ export const buildDiscordHelp = ({
     verifyCommand,
     setupCommand,
     settingsCommand,
+    statsCommand,
     ownerCommand,
     helpCommand
   });
@@ -938,6 +941,117 @@ export const handleVerifyCommand = async (message, args, context) => {
   }
 };
 
+export const handleStatsCommand = async (message, args, context) => {
+  const {
+    discordConfig,
+    commandPrefix,
+    statsCommandName,
+    translator,
+    volumeVerifier,
+    statsService = statisticsService
+  } = context;
+
+  const translate = ensureTranslator(translator);
+
+  if (!isDiscordAdmin(message, discordConfig)) {
+    await message.reply(translate('discord.stats.unauthorised'));
+    logger.warn('Discord user attempted to access stats without permission.', {
+      userId: message.author?.id,
+      guildId: message.guild?.id
+    });
+    return;
+  }
+
+  if (args.length && ['help', '?'].includes(args[0].toLowerCase())) {
+    await message.reply(translate('discord.stats.usage', {
+      prefix: commandPrefix,
+      command: statsCommandName
+    }));
+    return;
+  }
+
+  let exchangeFilter = null;
+  let scopeLabel = translate('discord.stats.scopeAll');
+
+  if (args.length) {
+    const candidate = args[0].toLowerCase();
+    if (candidate !== 'all') {
+      const exchangeConfig = volumeVerifier.getExchangeConfig ? volumeVerifier.getExchangeConfig(candidate) : null;
+      if (!exchangeConfig) {
+        await message.reply(translate('discord.stats.unknownExchange', { exchange: args[0] }));
+        return;
+      }
+      exchangeFilter = candidate;
+      scopeLabel = exchangeConfig.description || exchangeConfig.name || candidate;
+    }
+  }
+
+  try {
+    const stats = await statsService.getTradingVolumeStats({ exchangeId: exchangeFilter });
+
+    if (!stats.exchanges.length) {
+      await message.reply(translate('discord.stats.noData', { scope: scopeLabel }));
+      return;
+    }
+
+    const lines = [translate('discord.stats.header', { scope: scopeLabel })];
+
+    stats.exchanges.forEach((entry) => {
+      const exchangeConfig = volumeVerifier.getExchangeConfig ? volumeVerifier.getExchangeConfig(entry.exchange) : null;
+      const name = exchangeConfig?.description || exchangeConfig?.name || entry.exchange;
+      const lastUpdated = entry.lastSnapshotIso
+        ? translate('discord.stats.lastUpdated', { timestamp: entry.lastSnapshotIso })
+        : translate('discord.stats.lastUpdatedUnknown');
+      const exchangeVolumeDisplay = entry.exchangeTotalAvailable
+        ? entry.exchangeTotalVolumeFormatted
+        : translate('discord.stats.exchangeTotalUnavailable');
+      const inviteeDisplay = entry.exchangeTotalAvailable
+        ? (Number.isFinite(entry.exchangeInviteeCount)
+          ? entry.exchangeInviteeCount
+          : translate('discord.stats.exchangeInviteesUnknown'))
+        : translate('discord.stats.exchangeTotalUnavailable');
+      const exchangeRefreshed = entry.exchangeTotalAvailable
+        ? (entry.exchangeTotalsFetchedAtIso
+          ? translate('discord.stats.exchangeRefreshed', { timestamp: entry.exchangeTotalsFetchedAtIso })
+          : translate('discord.stats.exchangeRefreshedUnknown'))
+        : translate('discord.stats.exchangeTotalUnavailable');
+
+      lines.push(translate('discord.stats.exchangeLine', {
+        name,
+        verifiedVolume: entry.totalVolumeFormatted,
+        accounts: entry.accountCount,
+        lastUpdated,
+        exchangeVolume: exchangeVolumeDisplay,
+        invitees: inviteeDisplay,
+        exchangeRefreshed
+      }));
+    });
+
+    if (stats.exchanges.length > 1) {
+      lines.push('', translate('discord.stats.overallLine', {
+        volume: stats.grandTotalVolumeFormatted,
+        accounts: stats.grandTotalAccounts
+      }));
+
+      if (stats.exchangeTotalsAvailableCount > 0 && stats.grandExchangeVolumeFormatted) {
+        const aggregateInvitees = Number.isFinite(stats.grandExchangeInvitees)
+          ? stats.grandExchangeInvitees
+          : translate('discord.stats.exchangeInviteesUnknown');
+        lines.push(translate('discord.stats.overallExchangeLine', {
+          volume: stats.grandExchangeVolumeFormatted,
+          invitees: aggregateInvitees,
+          exchanges: stats.exchangeTotalsAvailableCount
+        }));
+      }
+    }
+
+    await message.reply(lines.join('\n'));
+  } catch (error) {
+    logger.error(`Discord stats command failed: ${error.message}`);
+    await message.reply(translate('discord.stats.error', { message: error.message }));
+  }
+};
+
 export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {}) => {
   if (!discordConfig?.enabled) {
     logger.info('Discord integration disabled.');
@@ -964,6 +1078,7 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
   const commandName = discordConfig.commandName || 'verify';
   const commandPrefix = discordConfig.commandPrefix || '!';
   const settingsCommandName = discordConfig.settingsCommandName || 'settings';
+  const statsCommandName = discordConfig.statsCommandName || 'stats';
   const ownerCommandName = discordConfig.ownerCommandName || 'owner';
   const helpCommandName = discordConfig.helpCommandName || 'help';
   const setupCommandName = discordConfig.setupCommandName || 'setup';
@@ -1019,6 +1134,18 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
       return;
     }
 
+    if (receivedCommand === statsCommandName) {
+      await handleStatsCommand(message, args, {
+        discordConfig,
+        commandPrefix,
+        statsCommandName,
+        translator,
+        volumeVerifier,
+        statsService: dependencies.statsService || statisticsService
+      });
+      return;
+    }
+
     if (receivedCommand === ownerCommandName) {
       await handleOwnerCommand(message, args, {
         discordConfig,
@@ -1040,6 +1167,7 @@ export const createDiscordBot = (discordConfig, volumeVerifier, dependencies = {
         verifyCommand: commandName,
         setupCommand: setupCommandName,
         settingsCommand: settingsCommandName,
+        statsCommand: statsCommandName,
         ownerCommand: ownerCommandName,
         helpCommand: helpCommandName,
         translator

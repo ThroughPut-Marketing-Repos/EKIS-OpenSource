@@ -4,6 +4,7 @@ import logger from '../utils/logger.js';
 import configUpdateService from '../services/configUpdateService.js';
 import { getConfig as loadRuntimeConfig } from '../config/configManager.js';
 import { saveVerifiedUser, VerifiedUserConflictError } from '../services/verificationService.js';
+import statisticsService from '../services/statisticsService.js';
 
 const STEPS = {
   AWAITING_EXCHANGE: 'awaiting_exchange',
@@ -408,6 +409,107 @@ export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerif
   }
 };
 
+export const createTelegramStatsHandler = ({ bot, telegramConfig, volumeVerifier, translator }) => async (msg, argsText) => {
+  const translate = ensureTranslator(translator);
+  const chatId = msg.chat.id;
+
+  if (!isTelegramAdmin(telegramConfig, msg)) {
+    await bot.sendMessage(chatId, translate('telegram.stats.unauthorised'));
+    logger.warn('Telegram user attempted to access /stats without permission.', {
+      telegramUserId: msg.from?.id,
+      chatId
+    });
+    return;
+  }
+
+  const args = parseArgs(argsText);
+  if (args.length && ['help', '?'].includes(args[0].toLowerCase())) {
+    await bot.sendMessage(chatId, translate('telegram.stats.usage'));
+    return;
+  }
+
+  let exchangeFilter = null;
+  let scopeLabel = translate('telegram.stats.scopeAll');
+
+  if (args.length) {
+    const candidate = args[0].toLowerCase();
+    if (candidate !== 'all') {
+      const exchangeConfig = volumeVerifier.getExchangeConfig ? volumeVerifier.getExchangeConfig(candidate) : null;
+      if (!exchangeConfig) {
+        await bot.sendMessage(chatId, translate('telegram.stats.unknownExchange', { exchange: args[0] }));
+        return;
+      }
+      exchangeFilter = candidate;
+      scopeLabel = exchangeConfig.description || exchangeConfig.name || candidate;
+    }
+  }
+
+  try {
+    const stats = await statisticsService.getTradingVolumeStats({ exchangeId: exchangeFilter });
+
+    if (!stats.exchanges.length) {
+      await bot.sendMessage(chatId, translate('telegram.stats.noData', { scope: scopeLabel }));
+      return;
+    }
+
+    const responseLines = [translate('telegram.stats.header', { scope: scopeLabel })];
+
+    stats.exchanges.forEach((entry) => {
+      const exchangeConfig = volumeVerifier.getExchangeConfig ? volumeVerifier.getExchangeConfig(entry.exchange) : null;
+      const name = exchangeConfig?.description || exchangeConfig?.name || entry.exchange;
+      const lastUpdated = entry.lastSnapshotIso
+        ? translate('telegram.stats.lastUpdated', { timestamp: entry.lastSnapshotIso })
+        : translate('telegram.stats.lastUpdatedUnknown');
+      const exchangeVolumeDisplay = entry.exchangeTotalAvailable
+        ? entry.exchangeTotalVolumeFormatted
+        : translate('telegram.stats.exchangeTotalUnavailable');
+      const inviteeDisplay = entry.exchangeTotalAvailable
+        ? (Number.isFinite(entry.exchangeInviteeCount)
+          ? entry.exchangeInviteeCount
+          : translate('telegram.stats.exchangeInviteesUnknown'))
+        : translate('telegram.stats.exchangeTotalUnavailable');
+      const exchangeRefreshed = entry.exchangeTotalAvailable
+        ? (entry.exchangeTotalsFetchedAtIso
+          ? translate('telegram.stats.exchangeRefreshed', { timestamp: entry.exchangeTotalsFetchedAtIso })
+          : translate('telegram.stats.exchangeRefreshedUnknown'))
+        : translate('telegram.stats.exchangeTotalUnavailable');
+
+      responseLines.push(translate('telegram.stats.exchangeLine', {
+        name,
+        verifiedVolume: entry.totalVolumeFormatted,
+        accounts: entry.accountCount,
+        lastUpdated,
+        exchangeVolume: exchangeVolumeDisplay,
+        invitees: inviteeDisplay,
+        exchangeRefreshed
+      }));
+    });
+
+    if (stats.exchanges.length > 1) {
+      responseLines.push('', translate('telegram.stats.overallLine', {
+        volume: stats.grandTotalVolumeFormatted,
+        accounts: stats.grandTotalAccounts
+      }));
+
+      if (stats.exchangeTotalsAvailableCount > 0 && stats.grandExchangeVolumeFormatted) {
+        const aggregateInvitees = Number.isFinite(stats.grandExchangeInvitees)
+          ? stats.grandExchangeInvitees
+          : translate('telegram.stats.exchangeInviteesUnknown');
+        responseLines.push(translate('telegram.stats.overallExchangeLine', {
+          volume: stats.grandExchangeVolumeFormatted,
+          invitees: aggregateInvitees,
+          exchanges: stats.exchangeTotalsAvailableCount
+        }));
+      }
+    }
+
+    await bot.sendMessage(chatId, responseLines.join('\n'));
+  } catch (error) {
+    logger.error(`Telegram stats command failed: ${error.message}`);
+    await bot.sendMessage(chatId, translate('telegram.stats.error', { message: error.message }));
+  }
+};
+
 export const createTelegramOwnerHandler = ({ bot, telegramConfig, configUpdater, translator }) => async (msg, argsText) => {
   const translate = ensureTranslator(translator);
   const chatId = msg.chat.id;
@@ -799,6 +901,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
   };
 
   const handleSettingsCommand = createTelegramSettingsHandler({ bot, telegramConfig, volumeVerifier, configUpdater, translator });
+  const handleStatsCommand = createTelegramStatsHandler({ bot, telegramConfig, volumeVerifier, translator });
   const handleOwnerCommand = createTelegramOwnerHandler({ bot, telegramConfig, configUpdater, translator });
 
   const handleGroupSetupCommand = async (msg, argsText) => {
@@ -1035,6 +1138,10 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       '',
       translate('telegram.help.detailedHelp')
     ].join('\n'));
+  });
+
+  bot.onText(/\/stats(?:@[\w_]+)?(?:\s+(.*))?/, async (msg, match) => {
+    await handleStatsCommand(msg, match?.[1]);
   });
 
   bot.onText(/\/settings(?:@[\w_]+)?(?:\s+(.*))?/, async (msg, match) => {

@@ -23,6 +23,7 @@ export const defaultConfig = {
     commandPrefix: '!',
     commandName: 'verify',
     settingsCommandName: 'settings',
+    statsCommandName: 'stats',
     guilds: [],
     adminUserIds: [],
     adminRoleIds: [],
@@ -133,7 +134,8 @@ const applyEnvironmentOverrides = (config) => {
         ? String(process.env.DISCORD_ENABLED).toLowerCase() === 'true'
         : undefined,
       commandPrefix: process.env.DISCORD_COMMAND_PREFIX,
-      commandName: process.env.DISCORD_COMMAND_NAME
+      commandName: process.env.DISCORD_COMMAND_NAME,
+      statsCommandName: process.env.DISCORD_STATS_COMMAND_NAME
     },
     telegram: {
       token: process.env.TELEGRAM_BOT_TOKEN,

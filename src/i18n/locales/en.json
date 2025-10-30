@@ -257,6 +257,8 @@
   "telegram": {
     "verification": {
       "welcome": "Welcome! Select the exchange you want to verify with to continue.",
+      "singleExchangeWelcome": "Welcome! We'll verify your UID on {{ exchange }}.",
+      "singleExchangeSummary": "{{ exchange }} requires an eligible affiliate account.",
       "selectExchangePrompt": "After selecting an exchange, send your UID so we can confirm your affiliate status and qualifying deposit.",
       "noExchangesConfigured": "No exchanges are configured for verification at this time.",
       "sendValidUid": "Please send a valid UID so we can continue the verification process.",

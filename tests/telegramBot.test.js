@@ -392,6 +392,56 @@ describe('telegram verification invites', () => {
     saveVerifiedUserMock.mockResolvedValue();
   });
 
+  it('skips the exchange selection keyboard when only one exchange is configured', async () => {
+    const exchanges = [{
+      id: 'binance',
+      description: 'Binance',
+      depositThreshold: 250,
+      affiliateLink: 'https://example.com/affiliate'
+    }];
+    const verifyResult = {
+      passed: false,
+      exchangeId: 'binance',
+      exchangeName: 'Binance',
+      uid: 'UID123',
+      volume: null,
+      volumeMet: null,
+      minimumVolume: 1000,
+      deposit: { met: false, threshold: 250, reason: 'no deposit' },
+      timestamp: '2024-01-01T00:00:00.000Z'
+    };
+
+    const volumeVerifier = {
+      getExchanges: jest.fn().mockReturnValue(exchanges),
+      verify: jest.fn().mockResolvedValue(verifyResult),
+      getExchangeConfig: jest.fn().mockReturnValue(exchanges[0])
+    };
+
+    createTelegramBot({ enabled: true, token: 'token' }, volumeVerifier, { translator });
+
+    const startHandler = onTextMock.mock.calls.find(([pattern]) => pattern.toString() === '/\\/start/i')[1];
+    await startHandler({ chat: { id: chatId }, from: { id: telegramUserId } });
+
+    expect(loggerMock.info).toHaveBeenCalledWith(
+      'Bypassing Telegram exchange selection: single exchange configured.',
+      expect.objectContaining({ chatId, exchangeId: 'binance' })
+    );
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(1);
+    const [targetChatId, messageText, options] = sendMessageMock.mock.calls[0];
+    expect(targetChatId).toEqual(chatId);
+    expect(messageText).toContain('Great choice! Binance requires an eligible affiliate account.');
+    expect(messageText).toContain('Minimum deposit: 250');
+    expect(messageText).toContain('Please reply with the UID you would like us to verify.');
+    expect(messageText).toContain('https://example.com/affiliate');
+    expect(options).toBeUndefined();
+
+    const messageHandler = onMock.mock.calls.find(([event]) => event === 'message')[1];
+    await messageHandler({ chat: { id: chatId }, from: { id: telegramUserId }, text: 'UID123' });
+
+    expect(volumeVerifier.verify).toHaveBeenCalledWith('UID123', { exchangeId: 'binance' });
+  });
+
   it('sends invite buttons when verification succeeds', async () => {
     const exchanges = [{ id: 'binance', description: 'Binance' }];
     const verifyResult = {

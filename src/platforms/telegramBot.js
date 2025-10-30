@@ -742,9 +742,53 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
 
     if (!exchanges.length) {
       logger.warn('Telegram verification requested but no exchanges are configured.');
+      sessions.set(chatId, { step: STEPS.AWAITING_EXCHANGE });
       await bot.sendMessage(chatId, translate('telegram.verification.noExchangesConfigured'));
       return;
     }
+
+    if (exchanges.length === 1) {
+      const [singleExchange] = exchanges;
+      const exchangeId = singleExchange.id;
+      const exchangeLabel = singleExchange.description || singleExchange.name || exchangeId;
+      const affiliateLink = singleExchange.affiliateLink || null;
+
+      // Skip the selection keyboard when only one exchange is available so the user can
+      // immediately provide their UID. This keeps the conversation concise without
+      // changing the downstream verification behaviour.
+      sessions.set(chatId, {
+        step: STEPS.AWAITING_UID,
+        exchangeId,
+        exchangeName: exchangeLabel,
+        affiliateLink
+      });
+
+      logger.info('Bypassing Telegram exchange selection: single exchange configured.', {
+        chatId,
+        exchangeId
+      });
+
+      const messageLines = [
+        translate('telegram.verification.welcome'),
+        translate('telegram.verification.exchangeSelected', { exchange: exchangeLabel }),
+        translate('telegram.verification.sendUidInstruction')
+      ];
+
+      if (typeof singleExchange.depositThreshold === 'number' && !Number.isNaN(singleExchange.depositThreshold)) {
+        messageLines.splice(2, 0, translate('telegram.verification.minimumDeposit', {
+          amount: singleExchange.depositThreshold
+        }));
+      }
+
+      if (affiliateLink) {
+        messageLines.push('', translate('telegram.verification.affiliateLinkLabel', { link: affiliateLink }));
+      }
+
+      await bot.sendMessage(chatId, messageLines.join('\n'));
+      return;
+    }
+
+    sessions.set(chatId, { step: STEPS.AWAITING_EXCHANGE });
 
     const messageLines = [
       translate('telegram.verification.welcome'),
@@ -1119,7 +1163,6 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
 
   bot.onText(/\/start/i, async (msg) => {
     const chatId = msg.chat.id;
-    sessions.set(chatId, { step: STEPS.AWAITING_EXCHANGE });
     logger.info('Received /start command from Telegram user.', {
       telegramUserId: msg.from?.id,
       chatId

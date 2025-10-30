@@ -8,6 +8,8 @@
 1. A user sends `/start` to the bot via direct message (use `/help` at any time to review available commands and examples).
 2. The bot lists every configured exchange as inline buttons (this step is skipped when only one exchange is available).
 3. After the user selects an exchange &mdash; or immediately when only one exchange is configured &mdash; the bot prompts for their UID.
+   Single-exchange deployments explicitly mention the default exchange in the greeting before asking for the UID so the
+   flow reads naturally without the selection keyboard.
 4. The verifier confirms the UID belongs to the configured affiliate programme and that the deposit requirement is met.
 5. On success, the bot creates one-time invite links for every configured Telegram group and delivers them as inline buttons
    that open each space directly from the chat.

@@ -769,8 +769,9 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       });
 
       const messageLines = [
-        translate('telegram.verification.welcome'),
-        translate('telegram.verification.exchangeSelected', { exchange: exchangeLabel }),
+        translate('telegram.verification.singleExchangeWelcome', { exchange: exchangeLabel }),
+        translate('telegram.verification.singleExchangeSummary', { exchange: exchangeLabel }),
+
         translate('telegram.verification.sendUidInstruction')
       ];
 

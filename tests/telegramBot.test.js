@@ -430,7 +430,8 @@ describe('telegram verification invites', () => {
     expect(sendMessageMock).toHaveBeenCalledTimes(1);
     const [targetChatId, messageText, options] = sendMessageMock.mock.calls[0];
     expect(targetChatId).toEqual(chatId);
-    expect(messageText).toContain('Great choice! Binance requires an eligible affiliate account.');
+    expect(messageText).toContain("Welcome! We'll verify your UID on Binance.");
+    expect(messageText).toContain('Binance requires an eligible affiliate account.');
     expect(messageText).toContain('Minimum deposit: 250');
     expect(messageText).toContain('Please reply with the UID you would like us to verify.');
     expect(messageText).toContain('https://example.com/affiliate');

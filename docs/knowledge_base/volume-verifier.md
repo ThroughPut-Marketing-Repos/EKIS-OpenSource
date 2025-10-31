@@ -26,6 +26,20 @@ validates the deposit requirement, and captures a fresh volume snapshot for anal
 
 Errors from exchange clients are normalised so user-facing responses avoid leaking implementation details.
 
+## Duplicate UID handling
+
+`src/services/verificationService.js` persists the outcome of successful verifications in the
+`verified_users` table. Some exchanges occasionally resend the same verification payload in quick
+succession, which can surface a `SequelizeUniqueConstraintError` even after the application checks for
+an existing record. The service now treats those database-level validation errors as a signal that the
+UID already exists. When encountered, it reloads the persisted entry, confirms that the identity fields
+(`telegramId`, `discordUserId`, and `userId`) do not conflict with the incoming request, and returns the
+stored record. If a mismatch is detected, the helper raises a `VerifiedUserConflictError` so the bot can
+inform the requester that another account already claimed the UID.
+
+This approach keeps the verification flow resilient during race conditions while still preventing
+account takeovers when the cached identifiers differ.
+
 ## Exchange integrations
 
 The bot ships with dedicated helpers for several partner programmes. These classes live under

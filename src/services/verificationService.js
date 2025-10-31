@@ -147,6 +147,54 @@ export const saveVerifiedUser = async (influencer, uid, data) => {
     if (error instanceof VerifiedUserConflictError) {
       throw error;
     }
+
+    // A SequelizeUniqueConstraintError is wrapped in a generic ValidationError message.
+    // When this happens we attempt to look up the existing record so we can
+    // return it (if the identity information matches) or raise a conflict error.
+    if (error?.name === 'SequelizeUniqueConstraintError') {
+      try {
+        const existingRecord = await VerifiedUser.findOne({ where: { influencer, uid } });
+
+        if (existingRecord) {
+          const conflicts = hasIdentityConflict(existingRecord, data);
+          if (conflicts) {
+            logger.warn(
+              `Unique constraint violation detected for verified UID ${uid} belonging to ${influencer} with conflicting identity fields: ${conflicts.join(', ')}`,
+              {
+                influencer,
+                uid,
+                conflicts,
+                existingUserId: existingRecord.userId,
+                existingDiscordUserId: existingRecord.discordUserId,
+                existingTelegramId: existingRecord.telegramId
+              }
+            );
+            throw new VerifiedUserConflictError('This UID has already been verified by another account.', {
+              influencer,
+              uid,
+              conflicts
+            });
+          }
+
+          logger.info(
+            `Verified UID ${uid} for ${influencer} already exists. Returning persisted record after unique constraint violation.`,
+            {
+              influencer,
+              uid,
+              userId: existingRecord.userId,
+              discordUserId: existingRecord.discordUserId,
+              telegramId: existingRecord.telegramId
+            }
+          );
+          return existingRecord;
+        }
+      } catch (lookupError) {
+        logger.error(
+          `Failed to resolve verified user after unique constraint violation for UID ${uid} on ${influencer}: ${lookupError.message}`
+        );
+      }
+    }
+
     logger.error(`Error saving verified user to the database: ${error.message}`);
     throw error;
   }

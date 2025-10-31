@@ -63,26 +63,36 @@ class BlofinService {
       'Content-Type': 'application/json'
     };
 
-    try {
-      const url = `${this.baseUrl}${pathWithParams}`;
-      logVerbose(`[Blofin] GET ${url}`);
-      const response = await axios.get(url, { headers });
-      const payloadSummary = {
-        status: response.status,
-        hasMore: response.data?.hasMore ?? null,
-        count: Array.isArray(response.data?.data) ? response.data.data.length : 0
-      };
-      logger.info('[Blofin] Sub-affiliate invitees response received.', {
-        ...payloadSummary,
-        payload: response.data
-      });
-      logVerbose('[Blofin] Sub-affiliate invitees response payload.', response.data);
-      return response.data;
-    } catch (error) {
-      if (error.response?.status === 429) {
-        throw error;
-      }
-      const message = error.response?.data || error.message || error;
+      try {
+          const url = `${this.baseUrl}${pathWithParams}`;
+          logVerbose(`[Blofin] GET ${url}`);
+          const response = await axios.get(url, {headers});
+
+          // Add detailed response logging
+          logger.debug(`[Blofin] Raw sub-affiliate invitees response: ${JSON.stringify({
+              status: response.status,
+              statusText: response.statusText,
+              data: response.data,
+              url: response.config?.url,
+              method: response.config?.method
+          })}`);
+
+          const payloadSummary = {
+              status: response.status,
+              hasMore: response.data?.hasMore ?? null,
+              count: Array.isArray(response.data?.data) ? response.data.data.length : 0
+          };
+          logger.info('[Blofin] Sub-affiliate invitees response received.', {
+              ...payloadSummary,
+              payload: response.data
+          });
+          logVerbose('[Blofin] Sub-affiliate invitees response payload.', response.data);
+          return response.data;
+      } catch (error) {
+          if (error.response?.status === 429) {
+              throw error;
+          }
+          const message = error.response?.data || error.message || error;
       logger.error(`Blofin sub-affiliate invitees error: ${JSON.stringify(message)}`);
       throw error;
     }
@@ -106,27 +116,74 @@ class BlofinService {
       'Content-Type': 'application/json'
     };
 
-    try {
-      const url = `${this.baseUrl}${pathWithParams}`;
-      logVerbose(`[Blofin] GET ${url}`);
-      const response = await axios.get(url, { headers });
-      const payloadSummary = {
-        status: response.status,
-        hasMore: response.data?.hasMore ?? null,
-        count: Array.isArray(response.data?.data) ? response.data.data.length : 0
+      try {
+          const url = `${this.baseUrl}${pathWithParams}`;
+          logVerbose(`[Blofin] Initiating GET request to ${url}`);
+
+          // Log request details
+          logger.debug(`[Blofin] Direct invitees request details: ${JSON.stringify({
+              url,
+              method: 'GET',
+              headers: {
+                  ...headers,
+                  'ACCESS-KEY': headers['ACCESS-KEY'] ? '***' : undefined,
+                  'ACCESS-SIGN': headers['ACCESS-SIGN'] ? '***' : undefined,
+                  'ACCESS-PASSPHRASE': headers['ACCESS-PASSPHRASE'] ? '***' : undefined
+              },
+              timestamp: new Date().toISOString()
+          })}`);
+
+          const response = await axios.get(url, {headers});
+
+          // Log raw response details
+          logger.debug(`[Blofin] Direct invitees raw response: ${JSON.stringify({
+              status: response.status,
+              statusText: response.statusText,
+              data: response.data,
+              timing: response.headers['x-response-time'],
+              requestId: response.headers['x-request-id']
+          })}`);
+
+          const payloadSummary = {
+              status: response.status,
+              hasMore: response.data?.hasMore ?? null,
+              count: Array.isArray(response.data?.data) ? response.data.data.length : 0
+          };
+
+          // Log structured response summary
+          logger.info('[Blofin] Direct invitees response received', {
+              ...payloadSummary,
+              firstRecord: response.data?.data?.[0]?.uid ? {
+                  uid: response.data.data[0].uid,
+                  hasVolume: Boolean(response.data.data[0].totalTradingVolume)
+              } : null,
+              payload: response.data
+          });
+
+          logVerbose('[Blofin] Direct invitees complete response payload', response.data);
+          return response.data;
+      } catch (error) {
+          // Enhanced error logging
+          if (error.response?.status === 429) {
+              logger.warn('[Blofin] Rate limit exceeded for direct invitees request', {
+                  status: error.response.status,
+                  headers: error.response.headers,
+                  resetTime: error.response.headers['rate-limit-reset'],
+                  remainingRequests: error.response.headers['rate-limit-remaining']
+              });
+              throw error;
+          }
+
+          const errorDetails = {
+              message: error.message,
+              code: error.code,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        path: pathWithParams
       };
-      logger.info('[Blofin] Direct invitees response received.', {
-        ...payloadSummary,
-        payload: response.data
-      });
-      logVerbose('[Blofin] Direct invitees response payload.', response.data);
-      return response.data;
-    } catch (error) {
-      if (error.response?.status === 429) {
-        throw error;
-      }
-      const message = error.response?.data || error.message || error;
-      logger.error(`Blofin direct invitees error: ${JSON.stringify(message)}`);
+    
+      logger.error('[Blofin] Direct invitees request failed', errorDetails);
       throw error;
     }
   }
@@ -326,10 +383,28 @@ class BlofinService {
 
     try {
       logger.info(`[Blofin] Initiating USDT withdrawal for UID ${uid} amount ${amount}.`);
-      const initiateResponse = await axios.post(`${this.baseUrl}${requestPath}`, body, { headers });
-      const { code, msg, data } = initiateResponse.data;
+        logger.debug('[Blofin] Initiating withdrawal request.', {
+            url: `${this.baseUrl}${requestPath}`,
+            body,
+            headers: {
+                ...headers,
+                'ACCESS-KEY': '***',
+                'ACCESS-SIGN': '***',
+                'ACCESS-PASSPHRASE': '***'
+            }
+        });
 
-      if (code !== '0') {
+        const initiateResponse = await axios.post(`${this.baseUrl}${requestPath}`, body, {headers});
+        const {code, msg, data} = initiateResponse.data;
+
+        logger.debug('[Blofin] Withdrawal initiation response.', {
+            status: initiateResponse.status,
+            statusText: initiateResponse.statusText,
+            headers: initiateResponse.headers,
+            responseData: initiateResponse.data
+        });
+
+        if (code !== '0') {
         logger.error(`Blofin withdrawal initiation failed: ${msg}`);
         throw new Error(`Withdrawal initiation failed: ${msg}`);
       }
@@ -376,9 +451,21 @@ class BlofinService {
             'ACCESS-PASSPHRASE': this.passphrase
           };
 
-          const historyResponse = await axios.get(`${this.baseUrl}${fullHistoryPath}`, { headers: historyHeaders });
-          const statusCall = historyResponse.data;
-          logVerbose('[Blofin] Withdrawal history response payload.', statusCall);
+            logger.debug('[Blofin] Checking withdrawal status.', {
+                url: `${this.baseUrl}${fullHistoryPath}`,
+                attempt: retries + 1,
+                withdrawId
+            });
+
+            const historyResponse = await axios.get(`${this.baseUrl}${fullHistoryPath}`, {headers: historyHeaders});
+            const statusCall = historyResponse.data;
+
+            logger.debug('[Blofin] Withdrawal status response.', {
+                status: historyResponse.status,
+                headers: historyResponse.headers,
+                responseData: statusCall
+            });
+            logVerbose('[Blofin] Withdrawal history response payload.', statusCall);
 
           if (statusCall.code === '0' && Array.isArray(statusCall.data) && statusCall.data.length > 0) {
             relevantRecord = statusCall.data.find((record) => record.withdrawId === withdrawId);

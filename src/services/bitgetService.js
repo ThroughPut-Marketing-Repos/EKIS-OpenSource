@@ -59,7 +59,7 @@ class BitgetService {
       return { verified: false, reason: 'Invalid API keys' };
     } catch (error) {
       const message = error.response?.data || error.message || error;
-      logger.error(`Bitget API key verification error: ${JSON.stringify(message)}`);
+      logger.error(`Bitget API key verification error: ${JSON.stringify(message, null, 2)}`);
       return { verified: false, reason: 'Error during verification' };
     }
   }

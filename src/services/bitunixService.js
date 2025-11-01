@@ -128,7 +128,7 @@ class BitunixService {
       return { verified: false, reason: 'api_error' };
     } catch (error) {
       const message = error.response?.data || error.message || error;
-      logger.error(`Bitunix verifyUid error for ${uid}: ${JSON.stringify(message)}`);
+      logger.error(`Bitunix verifyUid error for ${uid}: ${JSON.stringify(message, null, 2)}`);
       return { verified: false, reason: 'api_error' };
     }
   }
@@ -159,7 +159,7 @@ class BitunixService {
         page += 1;
       } catch (error) {
         const message = error.response?.data || error.message || error;
-        logger.error(`Bitunix fetchInvitees error: ${JSON.stringify(message)}`);
+        logger.error(`Bitunix fetchInvitees error: ${JSON.stringify(message, null, 2)}`);
         break;
       }
     }
@@ -184,7 +184,7 @@ class BitunixService {
       return total;
     } catch (error) {
       const message = error.response?.data || error.message || error;
-      logger.error(`Bitunix calculateVolume error: ${JSON.stringify(message)}`);
+      logger.error(`Bitunix calculateVolume error: ${JSON.stringify(message, null, 2)}`);
       throw error;
     }
   }
@@ -212,7 +212,7 @@ class BitunixService {
       return total;
     } catch (error) {
       const message = error.response?.data || error.message || error;
-      logger.error(`Bitunix getTotalTradingVolume error: ${JSON.stringify(message)}`);
+      logger.error(`Bitunix getTotalTradingVolume error: ${JSON.stringify(message, null, 2)}`);
       throw error;
     }
   }

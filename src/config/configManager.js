@@ -51,10 +51,10 @@ export const defaultConfig = {
     volumeCheckDays: 30,
     volumeWarningEnabled: true,
     volumeWarningDays: 2,
-    defaultExchange: 'mock',
+    defaultExchange: 'blofin',
     exchanges: {
-      mock: {
-        type: 'mock',
+      blofin: {
+        type: 'blofin',
         volumes: {
           'demo-user': 2500
         }

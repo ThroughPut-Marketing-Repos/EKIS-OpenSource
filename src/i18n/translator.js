@@ -134,7 +134,7 @@ export class Translator {
 
       if (isObject(template)) {
         // Return shallow copy to prevent accidental mutation of cached translations.
-        return JSON.parse(JSON.stringify(template));
+        return JSON.parse(JSON.stringify(template, null, 2));
       }
     }
 

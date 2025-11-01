@@ -212,7 +212,7 @@ const serialiseAdminList = (values) => {
   if (uniqueValues.length === 0) {
     return null;
   }
-  return JSON.stringify(uniqueValues);
+  return JSON.stringify(uniqueValues, null, 2);
 };
 
 const parseGroupList = (raw) => {
@@ -247,7 +247,7 @@ const serialiseGroupList = (values) => {
   if (uniqueValues.length === 0) {
     return null;
   }
-  return JSON.stringify(uniqueValues);
+  return JSON.stringify(uniqueValues, null, 2);
 };
 
 const updateAdminColumn = async (column, mutator) => {

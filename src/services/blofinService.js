@@ -38,7 +38,7 @@ class BlofinService {
   }
 
   createSignature(secretKey, nonce, method, timestamp, path, body = '') {
-    const serialisedBody = body ? JSON.stringify(body) : '';
+    const serialisedBody = body ? JSON.stringify(body, null, 2) : '';
     const prehashString = `${path}${method}${timestamp}${nonce}${serialisedBody}`;
     const encodedString = Buffer.from(prehashString, 'utf-8');
     const hmac = crypto.createHmac('sha256', secretKey);
@@ -75,7 +75,7 @@ class BlofinService {
               data: response.data,
               url: response.config?.url,
               method: response.config?.method
-          })}`);
+          }, null, 2)}`);
 
           const payloadSummary = {
               status: response.status,
@@ -93,7 +93,7 @@ class BlofinService {
               throw error;
           }
           const message = error.response?.data || error.message || error;
-      logger.error(`Blofin sub-affiliate invitees error: ${JSON.stringify(message)}`);
+      logger.error(`Blofin sub-affiliate invitees error: ${JSON.stringify(message, null, 2)}`);
       throw error;
     }
   }
@@ -131,7 +131,7 @@ class BlofinService {
                   'ACCESS-PASSPHRASE': headers['ACCESS-PASSPHRASE'] ? '***' : undefined
               },
               timestamp: new Date().toISOString()
-          })}`);
+          }, null, 2)}`);
 
           const response = await axios.get(url, {headers});
 
@@ -142,7 +142,7 @@ class BlofinService {
               data: response.data,
               timing: response.headers['x-response-time'],
               requestId: response.headers['x-request-id']
-          })}`);
+          }, null, 2)}`);
 
           const payloadSummary = {
               status: response.status,
@@ -276,7 +276,7 @@ class BlofinService {
           continue;
         }
         const message = error.response?.data || error.message || error;
-        logger.error(`Blofin direct invitees fetch error: ${JSON.stringify(message)}`);
+        logger.error(`Blofin direct invitees fetch error: ${JSON.stringify(message, null, 2)}`);
         throw error;
       }
     }
@@ -304,7 +304,7 @@ class BlofinService {
           continue;
         }
         const message = error.response?.data || error.message || error;
-        logger.error(`Blofin sub-affiliate invitees fetch error: ${JSON.stringify(message)}`);
+        logger.error(`Blofin sub-affiliate invitees fetch error: ${JSON.stringify(message, null, 2)}`);
         throw error;
       }
     }
@@ -478,7 +478,7 @@ class BlofinService {
           }
         } catch (error) {
           const message = error.response?.data || error.message || error;
-          logger.error(`Blofin withdrawal history error: ${JSON.stringify(message)}`);
+          logger.error(`Blofin withdrawal history error: ${JSON.stringify(message, null, 2)}`);
         }
 
         retries += 1;
@@ -537,7 +537,7 @@ class BlofinService {
       }
     } catch (error) {
       const message = error.response?.data || error.message || error;
-      logger.error(`Blofin withdrawal error: ${JSON.stringify(message)}`);
+      logger.error(`Blofin withdrawal error: ${JSON.stringify(message, null, 2)}`);
       return {
         success: false,
         message: 'Error communicating with the API',

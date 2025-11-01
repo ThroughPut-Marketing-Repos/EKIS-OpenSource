@@ -89,4 +89,35 @@ describe('removeDuplicateVerifiedUsers', () => {
     const result = await removeDuplicateVerifiedUsers(sequelize, VerifiedUser);
     expect(result).toEqual({ removed: 0, updated: 0 });
   });
+
+  it('purges duplicate rows that contain NULL influencer or uid keys', async () => {
+    const nullableSequelize = new Sequelize('sqlite::memory:', { logging: false });
+    const NullableVerifiedUser = nullableSequelize.define('VerifiedUserNullable', {
+      influencer: { type: DataTypes.STRING, allowNull: true },
+      uid: { type: DataTypes.STRING, allowNull: true },
+      telegramId: DataTypes.STRING
+    }, {
+      tableName: 'verified_users'
+    });
+
+    try {
+      await nullableSequelize.sync();
+
+      await NullableVerifiedUser.bulkCreate([
+        { influencer: null, uid: null, telegramId: 'tg-null-1' },
+        { influencer: null, uid: null, telegramId: 'tg-null-2' },
+        { influencer: null, uid: 'ghost', telegramId: 'tg-null-3' }
+      ], { validate: false });
+
+      const result = await removeDuplicateVerifiedUsers(nullableSequelize, NullableVerifiedUser);
+
+      expect(result.removed).toBe(3);
+      expect(result.updated).toBe(0);
+
+      const remaining = await NullableVerifiedUser.findAll({ raw: true });
+      expect(remaining).toHaveLength(0);
+    } finally {
+      await nullableSequelize.close();
+    }
+  });
 });

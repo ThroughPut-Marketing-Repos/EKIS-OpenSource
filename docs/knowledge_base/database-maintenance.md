@@ -3,6 +3,11 @@
 The `removeDuplicateVerifiedUsers` helper in `src/database/maintenance.js` is executed during service
 start-up to tidy the `verified_users` table before schema migrations run.
 
+During the same phase the service now calls `removeOrphanedForeignKeys` to ensure the relational
+integrity of the `verified_users` and `volume_snapshots` tables before `sequelize.sync()` attempts to
+enforce foreign key constraints. The routine clears references to deleted exchanges or API keys so
+the bot can boot even if manual database edits left behind dangling identifiers.
+
 ## Verified user deduplication
 
 - The cleanup now deletes any record that is missing either the `influencer` or `uid` key before
@@ -13,6 +18,17 @@ start-up to tidy the `verified_users` table before schema migrations run.
   record is retained, additional metadata is merged into it, and the redundant rows are removed.
 - All deletions and updates are logged through the shared Winston logger (`src/utils/logger.js`) to
   make production cleanups auditable.
+
+## Orphaned foreign key cleanup
+
+- When an exchange or API key row is removed outside of the application, affected `verified_users`
+  rows now have their `exchangeId` or `apiKeyId` columns nulled automatically.
+- `volume_snapshots` entries that reference missing exchanges are also normalised by setting their
+  `exchangeId` to `NULL`. Snapshot metadata (UID and exchange slug) is preserved so historical
+  records remain available for analytics.
+- Each cleanup run emits either debug logs (when no issues are detected) or a summary info log
+  containing the number of repaired references. Truncated lists of affected row IDs are provided in
+  warning logs to assist with operational audits without flooding log storage.
 
 If the helper reports removals without updates it usually means NULL-key rows were purged. Operators
 can re-run the maintenance script without downtime; the routine is idempotent and skips work when the

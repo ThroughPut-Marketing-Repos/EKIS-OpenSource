@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Sequelize, DataTypes } from 'sequelize';
 import logger from '../utils/logger.js';
-import { removeDuplicateVerifiedUsers } from './maintenance.js';
+import { removeDuplicateVerifiedUsers, removeOrphanedForeignKeys } from './maintenance.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -283,6 +283,10 @@ export const initializeDatabase = async () => {
 
   // Clean up historical duplicate rows before enforcing the unique constraint.
   await removeDuplicateVerifiedUsers(sequelize, Models.VerifiedUser);
+  await removeOrphanedForeignKeys(sequelize, {
+    VerifiedUser: Models.VerifiedUser,
+    VolumeSnapshot: Models.VolumeSnapshot
+  });
 
   await sequelize.sync({ alter: true });
   initialized = true;

@@ -1,5 +1,5 @@
 import { Sequelize, DataTypes } from 'sequelize';
-import { removeDuplicateVerifiedUsers } from '../src/database/maintenance.js';
+import { removeDuplicateVerifiedUsers, removeOrphanedForeignKeys } from '../src/database/maintenance.js';
 
 describe('removeDuplicateVerifiedUsers', () => {
   let sequelize;
@@ -119,5 +119,124 @@ describe('removeDuplicateVerifiedUsers', () => {
     } finally {
       await nullableSequelize.close();
     }
+  });
+});
+
+describe('removeOrphanedForeignKeys', () => {
+  let sequelize;
+  let VerifiedUser;
+  let Exchange;
+  let ApiKey;
+  let VolumeSnapshot;
+
+  beforeEach(async () => {
+    sequelize = new Sequelize('sqlite::memory:', { logging: false });
+
+    Exchange = sequelize.define('Exchange', {
+      name: DataTypes.STRING
+    }, { tableName: 'exchanges' });
+
+    ApiKey = sequelize.define('ApiKey', {
+      api_key_hash: DataTypes.STRING
+    }, { tableName: 'api_keys' });
+
+    VerifiedUser = sequelize.define('VerifiedUser', {
+      influencer: { type: DataTypes.STRING, allowNull: false },
+      uid: { type: DataTypes.STRING, allowNull: false },
+      exchangeId: { type: DataTypes.INTEGER, allowNull: true },
+      apiKeyId: { type: DataTypes.INTEGER, allowNull: true }
+    }, { tableName: 'verified_users' });
+
+    VolumeSnapshot = sequelize.define('VolumeSnapshot', {
+      uid: { type: DataTypes.STRING, allowNull: false },
+      exchange: DataTypes.STRING,
+      exchangeId: { type: DataTypes.INTEGER, allowNull: true }
+    }, { tableName: 'volume_snapshots' });
+
+    await sequelize.sync();
+  });
+
+  afterEach(async () => {
+    await sequelize.close();
+  });
+
+  it('nulls foreign keys that reference missing exchanges and API keys', async () => {
+    const liveExchange = await Exchange.create({ name: 'Live Exchange' });
+    const liveApiKey = await ApiKey.create({ api_key_hash: 'hash' });
+
+    const orphanedUser = await VerifiedUser.create({
+      influencer: 'alice',
+      uid: '1',
+      exchangeId: 999,
+      apiKeyId: 888
+    }, { validate: false });
+
+    const validUser = await VerifiedUser.create({
+      influencer: 'bob',
+      uid: '2',
+      exchangeId: liveExchange.id,
+      apiKeyId: liveApiKey.id
+    });
+
+    const orphanedSnapshot = await VolumeSnapshot.create({
+      uid: '1',
+      exchange: 'blofin',
+      exchangeId: 555
+    });
+
+    const validSnapshot = await VolumeSnapshot.create({
+      uid: '2',
+      exchange: 'blofin',
+      exchangeId: liveExchange.id
+    });
+
+    const result = await removeOrphanedForeignKeys(sequelize, {
+      VerifiedUser,
+      VolumeSnapshot
+    });
+
+    await orphanedUser.reload();
+    await validUser.reload();
+    await orphanedSnapshot.reload();
+    await validSnapshot.reload();
+
+    expect(result.verifiedUsers.clearedExchangeIds).toBe(1);
+    expect(result.verifiedUsers.clearedApiKeyIds).toBe(1);
+    expect(result.volumeSnapshots.clearedExchangeIds).toBe(1);
+
+    expect(orphanedUser.exchangeId).toBeNull();
+    expect(orphanedUser.apiKeyId).toBeNull();
+    expect(validUser.exchangeId).toBe(liveExchange.id);
+    expect(validUser.apiKeyId).toBe(liveApiKey.id);
+    expect(orphanedSnapshot.exchangeId).toBeNull();
+    expect(validSnapshot.exchangeId).toBe(liveExchange.id);
+  });
+
+  it('reports no changes when all references are valid', async () => {
+    const liveExchange = await Exchange.create({ name: 'Live Exchange' });
+    const liveApiKey = await ApiKey.create({ api_key_hash: 'hash' });
+
+    await VerifiedUser.create({
+      influencer: 'carol',
+      uid: '3',
+      exchangeId: liveExchange.id,
+      apiKeyId: liveApiKey.id
+    });
+
+    await VolumeSnapshot.create({
+      uid: '3',
+      exchange: 'blofin',
+      exchangeId: liveExchange.id
+    });
+
+    const result = await removeOrphanedForeignKeys(sequelize, {
+      VerifiedUser,
+      VolumeSnapshot
+    });
+
+    expect(result).toEqual({
+      verifiedUsers: { clearedExchangeIds: 0, clearedApiKeyIds: 0 },
+      volumeSnapshots: { clearedExchangeIds: 0 }
+    });
   });
 });

@@ -73,6 +73,15 @@ const normaliseTableNames = (tables) => tables.map((table) => {
   return String(table);
 });
 
+const tableExists = (tables, tableName) => normaliseTableNames(tables).includes(tableName);
+
+const summariseIds = (ids) => {
+  if (ids.length <= 10) {
+    return ids;
+  }
+  return `${ids.slice(0, 10).join(', ')}… (+${ids.length - 10} more)`;
+};
+
 const selectDuplicateGroups = async (sequelize) => {
   return sequelize.query(
     `SELECT influencer, uid FROM ${TABLE_NAME} GROUP BY influencer, uid HAVING COUNT(*) > 1`,
@@ -146,9 +155,9 @@ const mergeRecords = (records) => {
  */
 export const removeDuplicateVerifiedUsers = async (sequelize, VerifiedUserModel) => {
   const queryInterface = sequelize.getQueryInterface();
-  const tables = normaliseTableNames(await queryInterface.showAllTables());
+  const tables = await queryInterface.showAllTables();
 
-  if (!tables.includes(TABLE_NAME)) {
+  if (!tableExists(tables, TABLE_NAME)) {
     logger.debug('Verified users table not found; skipping duplicate cleanup.');
     return { removed: 0, updated: 0 };
   }
@@ -228,6 +237,109 @@ export const removeDuplicateVerifiedUsers = async (sequelize, VerifiedUserModel)
 
   logger.info('Duplicate verified user cleanup completed.', { removedRecords: removed, updatedRecords: updated });
   return { removed, updated };
+};
+
+// Clears foreign key values that reference non-existent exchanges or API keys so schema sync
+// migrations can safely apply constraints after operators prune related tables manually.
+export const removeOrphanedForeignKeys = async (sequelize, models = {}) => {
+  const queryInterface = sequelize.getQueryInterface();
+  const tables = await queryInterface.showAllTables();
+
+  const results = {
+    verifiedUsers: {
+      clearedExchangeIds: 0,
+      clearedApiKeyIds: 0
+    },
+    volumeSnapshots: {
+      clearedExchangeIds: 0
+    }
+  };
+
+  const verifiedUsersTableExists = tableExists(tables, TABLE_NAME);
+  const exchangesTableExists = tableExists(tables, 'exchanges');
+  const apiKeysTableExists = tableExists(tables, 'api_keys');
+
+  const { VerifiedUser, VolumeSnapshot } = models;
+
+  if (!verifiedUsersTableExists) {
+    logger.debug('Verified users table not found; skipping verified user foreign key cleanup.');
+  }
+
+  if (verifiedUsersTableExists && !VerifiedUser) {
+    logger.warn('VerifiedUser model unavailable; cannot repair foreign key references.');
+  }
+
+  if (verifiedUsersTableExists && VerifiedUser && exchangesTableExists) {
+    const orphanedExchangeRefs = await sequelize.query(
+      `SELECT vu.id FROM ${TABLE_NAME} vu
+       LEFT JOIN exchanges e ON vu.exchangeId = e.id
+       WHERE vu.exchangeId IS NOT NULL AND e.id IS NULL`,
+      { type: QueryTypes.SELECT }
+    );
+
+    if (orphanedExchangeRefs.length > 0) {
+      const ids = orphanedExchangeRefs.map(({ id }) => id).filter(Boolean);
+      if (ids.length > 0) {
+        await VerifiedUser.update({ exchangeId: null }, { where: { id: { [Op.in]: ids } } });
+        results.verifiedUsers.clearedExchangeIds = ids.length;
+        logger.warn('Cleared verified user exchange references pointing to missing exchanges.', {
+          affectedIds: summariseIds(ids)
+        });
+      }
+    }
+  }
+
+  if (verifiedUsersTableExists && VerifiedUser && apiKeysTableExists) {
+    const orphanedApiKeyRefs = await sequelize.query(
+      `SELECT vu.id FROM ${TABLE_NAME} vu
+       LEFT JOIN api_keys ak ON vu.apiKeyId = ak.id
+       WHERE vu.apiKeyId IS NOT NULL AND ak.id IS NULL`,
+      { type: QueryTypes.SELECT }
+    );
+
+    if (orphanedApiKeyRefs.length > 0) {
+      const ids = orphanedApiKeyRefs.map(({ id }) => id).filter(Boolean);
+      if (ids.length > 0) {
+        await VerifiedUser.update({ apiKeyId: null }, { where: { id: { [Op.in]: ids } } });
+        results.verifiedUsers.clearedApiKeyIds = ids.length;
+        logger.warn('Cleared verified user API key references pointing to missing records.', {
+          affectedIds: summariseIds(ids)
+        });
+      }
+    }
+  }
+
+  if (VolumeSnapshot && tableExists(tables, 'volume_snapshots') && exchangesTableExists) {
+    const orphanedVolumeSnapshots = await sequelize.query(
+      `SELECT vs.id FROM volume_snapshots vs
+       LEFT JOIN exchanges e ON vs.exchangeId = e.id
+       WHERE vs.exchangeId IS NOT NULL AND e.id IS NULL`,
+      { type: QueryTypes.SELECT }
+    );
+
+    if (orphanedVolumeSnapshots.length > 0) {
+      const ids = orphanedVolumeSnapshots.map(({ id }) => id).filter(Boolean);
+      if (ids.length > 0) {
+        await VolumeSnapshot.update({ exchangeId: null }, { where: { id: { [Op.in]: ids } } });
+        results.volumeSnapshots.clearedExchangeIds = ids.length;
+        logger.warn('Cleared volume snapshot exchange references pointing to missing exchanges.', {
+          affectedIds: summariseIds(ids)
+        });
+      }
+    }
+  }
+
+  if (
+    results.verifiedUsers.clearedExchangeIds === 0
+    && results.verifiedUsers.clearedApiKeyIds === 0
+    && results.volumeSnapshots.clearedExchangeIds === 0
+  ) {
+    logger.debug('No orphaned foreign key references detected during startup maintenance.');
+  } else {
+    logger.info('Completed orphaned foreign key cleanup for verified users and volume snapshots.', results);
+  }
+
+  return results;
 };
 
 export default removeDuplicateVerifiedUsers;

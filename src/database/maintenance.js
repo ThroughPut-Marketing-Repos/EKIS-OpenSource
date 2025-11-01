@@ -73,7 +73,51 @@ const normaliseTableNames = (tables) => tables.map((table) => {
   return String(table);
 });
 
-const tableExists = (tables, tableName) => normaliseTableNames(tables).includes(tableName);
+const normaliseForComparison = (name) => name.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const resolveTableName = (tables, desiredName) => {
+  if (!desiredName) {
+    return null;
+  }
+
+  const desired = normaliseForComparison(desiredName);
+  for (const tableName of normaliseTableNames(tables)) {
+    if (normaliseForComparison(tableName) === desired) {
+      return tableName;
+    }
+  }
+
+  return null;
+};
+
+const tableExists = (tables, tableName) => Boolean(resolveTableName(tables, tableName));
+
+const getModelTableName = (model) => {
+  if (!model) {
+    return null;
+  }
+
+  if (typeof model.getTableName === 'function') {
+    const resolved = model.getTableName();
+    if (resolved && typeof resolved === 'object' && 'tableName' in resolved) {
+      return resolved.tableName;
+    }
+    return resolved;
+  }
+
+  return model.tableName;
+};
+
+const setModelTableName = (model, tableName) => {
+  if (!model || !tableName) {
+    return;
+  }
+
+  model.tableName = tableName;
+  if (model.options) {
+    model.options.tableName = tableName;
+  }
+};
 
 const summariseIds = (ids) => {
   if (ids.length <= 10) {
@@ -82,14 +126,14 @@ const summariseIds = (ids) => {
   return `${ids.slice(0, 10).join(', ')}… (+${ids.length - 10} more)`;
 };
 
-const selectDuplicateGroups = async (sequelize) => {
+const selectDuplicateGroups = async (sequelize, tableName) => {
   return sequelize.query(
-    `SELECT influencer, uid FROM ${TABLE_NAME} GROUP BY influencer, uid HAVING COUNT(*) > 1`,
+    `SELECT influencer, uid FROM ${tableName} GROUP BY influencer, uid HAVING COUNT(*) > 1`,
     { type: QueryTypes.SELECT }
   );
 };
 
-const loadGroupRecords = async (sequelize, influencer, uid) => {
+const loadGroupRecords = async (sequelize, tableName, influencer, uid) => {
   const conditions = [];
   const replacements = {};
 
@@ -111,7 +155,7 @@ const loadGroupRecords = async (sequelize, influencer, uid) => {
 
   return sequelize.query(
     `SELECT id, influencer, uid, exchange, exchangeId, apiKeyId, userId, telegramId, discordUserId, guildId, verifiedAt, volumeWarningDate, createdAt, updatedAt
-     FROM ${TABLE_NAME}
+     FROM ${tableName}
      WHERE ${whereClause}`,
     {
       type: QueryTypes.SELECT,
@@ -157,7 +201,9 @@ export const removeDuplicateVerifiedUsers = async (sequelize, VerifiedUserModel)
   const queryInterface = sequelize.getQueryInterface();
   const tables = await queryInterface.showAllTables();
 
-  if (!tableExists(tables, TABLE_NAME)) {
+  const verifiedUsersTableName = resolveTableName(tables, TABLE_NAME);
+
+  if (!verifiedUsersTableName) {
     logger.debug('Verified users table not found; skipping duplicate cleanup.');
     return { removed: 0, updated: 0 };
   }
@@ -170,68 +216,87 @@ export const removeDuplicateVerifiedUsers = async (sequelize, VerifiedUserModel)
   let removed = 0;
   let updated = 0;
 
-  // Records missing either part of the composite key cannot satisfy the upcoming
-  // NOT NULL + UNIQUE constraint, so purge them up-front before attempting to
-  // merge richer duplicates. This mirrors the production fix where legacy rows
-  // with NULL keys must be eliminated entirely.
-  const orphanedRecords = await VerifiedUserModel.findAll({
-    where: {
-      [Op.or]: [
-        { influencer: null },
-        { uid: null }
-      ]
-    },
-    attributes: ['id', 'influencer', 'uid'],
-    raw: true
-  });
+  const originalTableName = getModelTableName(VerifiedUserModel);
+  const shouldRetargetModel = originalTableName !== verifiedUsersTableName;
 
-  if (orphanedRecords.length > 0) {
-    const orphanedIds = orphanedRecords.map(({ id }) => id).filter(Boolean);
-    if (orphanedIds.length > 0) {
-      await VerifiedUserModel.destroy({ where: { id: { [Op.in]: orphanedIds } } });
-      removed += orphanedIds.length;
-      logger.warn('Removed verified user entries missing influencer or uid keys prior to duplicate cleanup.', {
-        removedIds: orphanedIds
-      });
-    }
+  if (shouldRetargetModel) {
+    // Legacy databases might still expose the historical `VerifiedUsers` casing. Temporarily
+    // repoint the model so cleanup queries operate on the same physical table that sync() will
+    // migrate moments later.
+    logger.info('Detected legacy verified users table name; retargeting model for maintenance.', {
+      resolvedTableName: verifiedUsersTableName
+    });
+    setModelTableName(VerifiedUserModel, verifiedUsersTableName);
   }
 
-  const duplicateGroups = await selectDuplicateGroups(sequelize);
-  if (duplicateGroups.length === 0) {
-    logger.debug('No duplicate verified user records detected.');
-  } else {
-    for (const { influencer, uid } of duplicateGroups) {
-      const records = await loadGroupRecords(sequelize, influencer, uid);
-      if (records.length <= 1) {
-        continue;
-      }
+  try {
+    // Records missing either part of the composite key cannot satisfy the upcoming
+    // NOT NULL + UNIQUE constraint, so purge them up-front before attempting to
+    // merge richer duplicates. This mirrors the production fix where legacy rows
+    // with NULL keys must be eliminated entirely.
+    const orphanedRecords = await VerifiedUserModel.findAll({
+      where: {
+        [Op.or]: [
+          { influencer: null },
+          { uid: null }
+        ]
+      },
+      attributes: ['id', 'influencer', 'uid'],
+      raw: true
+    });
 
-      const { keeper, originalKeeper, duplicates } = mergeRecords(records);
-      const idsToDelete = duplicates.map(({ id }) => id).filter(Boolean);
-      const updates = {};
-
-      for (const field of [...MERGE_FIELDS, 'verifiedAt']) {
-        if (keeper[field] !== undefined && keeper[field] !== originalKeeper[field]) {
-          updates[field] = keeper[field];
-        }
-      }
-
-      if (Object.keys(updates).length > 0) {
-        updates.updatedAt = new Date();
-        await VerifiedUserModel.update(updates, { where: { id: keeper.id } });
-        updated += 1;
-      }
-
-      if (idsToDelete.length > 0) {
-        await VerifiedUserModel.destroy({ where: { id: { [Op.in]: idsToDelete } } });
-        removed += idsToDelete.length;
-        logger.warn('Removed duplicate verified user entries to enforce uniqueness.', {
-          influencer,
-          uid,
-          keptId: keeper.id,
-          removedIds: idsToDelete
+    if (orphanedRecords.length > 0) {
+      const orphanedIds = orphanedRecords.map(({ id }) => id).filter(Boolean);
+      if (orphanedIds.length > 0) {
+        await VerifiedUserModel.destroy({ where: { id: { [Op.in]: orphanedIds } } });
+        removed += orphanedIds.length;
+        logger.warn('Removed verified user entries missing influencer or uid keys prior to duplicate cleanup.', {
+          removedIds: orphanedIds
         });
       }
+    }
+
+    const duplicateGroups = await selectDuplicateGroups(sequelize, verifiedUsersTableName);
+    if (duplicateGroups.length === 0) {
+      logger.debug('No duplicate verified user records detected.');
+    } else {
+      for (const { influencer, uid } of duplicateGroups) {
+        const records = await loadGroupRecords(sequelize, verifiedUsersTableName, influencer, uid);
+        if (records.length <= 1) {
+          continue;
+        }
+
+        const { keeper, originalKeeper, duplicates } = mergeRecords(records);
+        const idsToDelete = duplicates.map(({ id }) => id).filter(Boolean);
+        const updates = {};
+
+        for (const field of [...MERGE_FIELDS, 'verifiedAt']) {
+          if (keeper[field] !== undefined && keeper[field] !== originalKeeper[field]) {
+            updates[field] = keeper[field];
+          }
+        }
+
+        if (Object.keys(updates).length > 0) {
+          updates.updatedAt = new Date();
+          await VerifiedUserModel.update(updates, { where: { id: keeper.id } });
+          updated += 1;
+        }
+
+        if (idsToDelete.length > 0) {
+          await VerifiedUserModel.destroy({ where: { id: { [Op.in]: idsToDelete } } });
+          removed += idsToDelete.length;
+          logger.warn('Removed duplicate verified user entries to enforce uniqueness.', {
+            influencer,
+            uid,
+            keptId: keeper.id,
+            removedIds: idsToDelete
+          });
+        }
+      }
+    }
+  } finally {
+    if (shouldRetargetModel) {
+      setModelTableName(VerifiedUserModel, originalTableName);
     }
   }
 
@@ -255,7 +320,8 @@ export const removeOrphanedForeignKeys = async (sequelize, models = {}) => {
     }
   };
 
-  const verifiedUsersTableExists = tableExists(tables, TABLE_NAME);
+  const verifiedUsersTableName = resolveTableName(tables, TABLE_NAME);
+  const verifiedUsersTableExists = Boolean(verifiedUsersTableName);
   const exchangesTableExists = tableExists(tables, 'exchanges');
   const apiKeysTableExists = tableExists(tables, 'api_keys');
 
@@ -269,43 +335,63 @@ export const removeOrphanedForeignKeys = async (sequelize, models = {}) => {
     logger.warn('VerifiedUser model unavailable; cannot repair foreign key references.');
   }
 
-  if (verifiedUsersTableExists && VerifiedUser && exchangesTableExists) {
-    const orphanedExchangeRefs = await sequelize.query(
-      `SELECT vu.id FROM ${TABLE_NAME} vu
-       LEFT JOIN exchanges e ON vu.exchangeId = e.id
-       WHERE vu.exchangeId IS NOT NULL AND e.id IS NULL`,
-      { type: QueryTypes.SELECT }
-    );
+  const originalVerifiedUsersTableName = getModelTableName(VerifiedUser);
+  const shouldRetargetVerifiedUser = verifiedUsersTableExists
+    && VerifiedUser
+    && originalVerifiedUsersTableName !== verifiedUsersTableName;
 
-    if (orphanedExchangeRefs.length > 0) {
-      const ids = orphanedExchangeRefs.map(({ id }) => id).filter(Boolean);
-      if (ids.length > 0) {
-        await VerifiedUser.update({ exchangeId: null }, { where: { id: { [Op.in]: ids } } });
-        results.verifiedUsers.clearedExchangeIds = ids.length;
-        logger.warn('Cleared verified user exchange references pointing to missing exchanges.', {
-          affectedIds: summariseIds(ids)
-        });
-      }
-    }
+  if (shouldRetargetVerifiedUser) {
+    // Align the runtime model with the resolved table name so raw SQL results can be updated via
+    // Sequelize even when the database still uses the legacy identifier.
+    logger.info('Retargeting VerifiedUser model to match legacy table before foreign key cleanup.', {
+      resolvedTableName: verifiedUsersTableName
+    });
+    setModelTableName(VerifiedUser, verifiedUsersTableName);
   }
 
-  if (verifiedUsersTableExists && VerifiedUser && apiKeysTableExists) {
-    const orphanedApiKeyRefs = await sequelize.query(
-      `SELECT vu.id FROM ${TABLE_NAME} vu
-       LEFT JOIN api_keys ak ON vu.apiKeyId = ak.id
-       WHERE vu.apiKeyId IS NOT NULL AND ak.id IS NULL`,
-      { type: QueryTypes.SELECT }
-    );
+  try {
+    if (verifiedUsersTableExists && VerifiedUser && exchangesTableExists) {
+      const orphanedExchangeRefs = await sequelize.query(
+        `SELECT vu.id FROM ${verifiedUsersTableName} vu
+         LEFT JOIN exchanges e ON vu.exchangeId = e.id
+         WHERE vu.exchangeId IS NOT NULL AND e.id IS NULL`,
+        { type: QueryTypes.SELECT }
+      );
 
-    if (orphanedApiKeyRefs.length > 0) {
-      const ids = orphanedApiKeyRefs.map(({ id }) => id).filter(Boolean);
-      if (ids.length > 0) {
-        await VerifiedUser.update({ apiKeyId: null }, { where: { id: { [Op.in]: ids } } });
-        results.verifiedUsers.clearedApiKeyIds = ids.length;
-        logger.warn('Cleared verified user API key references pointing to missing records.', {
-          affectedIds: summariseIds(ids)
-        });
+      if (orphanedExchangeRefs.length > 0) {
+        const ids = orphanedExchangeRefs.map(({ id }) => id).filter(Boolean);
+        if (ids.length > 0) {
+          await VerifiedUser.update({ exchangeId: null }, { where: { id: { [Op.in]: ids } } });
+          results.verifiedUsers.clearedExchangeIds = ids.length;
+          logger.warn('Cleared verified user exchange references pointing to missing exchanges.', {
+            affectedIds: summariseIds(ids)
+          });
+        }
       }
+    }
+
+    if (verifiedUsersTableExists && VerifiedUser && apiKeysTableExists) {
+      const orphanedApiKeyRefs = await sequelize.query(
+        `SELECT vu.id FROM ${verifiedUsersTableName} vu
+         LEFT JOIN api_keys ak ON vu.apiKeyId = ak.id
+         WHERE vu.apiKeyId IS NOT NULL AND ak.id IS NULL`,
+        { type: QueryTypes.SELECT }
+      );
+
+      if (orphanedApiKeyRefs.length > 0) {
+        const ids = orphanedApiKeyRefs.map(({ id }) => id).filter(Boolean);
+        if (ids.length > 0) {
+          await VerifiedUser.update({ apiKeyId: null }, { where: { id: { [Op.in]: ids } } });
+          results.verifiedUsers.clearedApiKeyIds = ids.length;
+          logger.warn('Cleared verified user API key references pointing to missing records.', {
+            affectedIds: summariseIds(ids)
+          });
+        }
+      }
+    }
+  } finally {
+    if (shouldRetargetVerifiedUser) {
+      setModelTableName(VerifiedUser, originalVerifiedUsersTableName);
     }
   }
 

@@ -81,13 +81,32 @@ const selectDuplicateGroups = async (sequelize) => {
 };
 
 const loadGroupRecords = async (sequelize, influencer, uid) => {
+  const conditions = [];
+  const replacements = {};
+
+  if (influencer === null || influencer === undefined) {
+    conditions.push('influencer IS NULL');
+  } else {
+    conditions.push('influencer = :influencer');
+    replacements.influencer = influencer;
+  }
+
+  if (uid === null || uid === undefined) {
+    conditions.push('uid IS NULL');
+  } else {
+    conditions.push('uid = :uid');
+    replacements.uid = uid;
+  }
+
+  const whereClause = conditions.join(' AND ');
+
   return sequelize.query(
     `SELECT id, influencer, uid, exchange, exchangeId, apiKeyId, userId, telegramId, discordUserId, guildId, verifiedAt, volumeWarningDate, createdAt, updatedAt
      FROM ${TABLE_NAME}
-     WHERE influencer = :influencer AND uid = :uid`,
+     WHERE ${whereClause}`,
     {
       type: QueryTypes.SELECT,
-      replacements: { influencer, uid }
+      replacements
     }
   );
 };
@@ -139,46 +158,71 @@ export const removeDuplicateVerifiedUsers = async (sequelize, VerifiedUserModel)
     return { removed: 0, updated: 0 };
   }
 
-  const duplicateGroups = await selectDuplicateGroups(sequelize);
-  if (duplicateGroups.length === 0) {
-    logger.debug('No duplicate verified user records detected.');
-    return { removed: 0, updated: 0 };
-  }
-
   let removed = 0;
   let updated = 0;
 
-  for (const { influencer, uid } of duplicateGroups) {
-    const records = await loadGroupRecords(sequelize, influencer, uid);
-    if (records.length <= 1) {
-      continue;
-    }
+  // Records missing either part of the composite key cannot satisfy the upcoming
+  // NOT NULL + UNIQUE constraint, so purge them up-front before attempting to
+  // merge richer duplicates. This mirrors the production fix where legacy rows
+  // with NULL keys must be eliminated entirely.
+  const orphanedRecords = await VerifiedUserModel.findAll({
+    where: {
+      [Op.or]: [
+        { influencer: null },
+        { uid: null }
+      ]
+    },
+    attributes: ['id', 'influencer', 'uid'],
+    raw: true
+  });
 
-    const { keeper, originalKeeper, duplicates } = mergeRecords(records);
-    const idsToDelete = duplicates.map(({ id }) => id).filter(Boolean);
-    const updates = {};
-
-    for (const field of [...MERGE_FIELDS, 'verifiedAt']) {
-      if (keeper[field] !== undefined && keeper[field] !== originalKeeper[field]) {
-        updates[field] = keeper[field];
-      }
-    }
-
-    if (Object.keys(updates).length > 0) {
-      updates.updatedAt = new Date();
-      await VerifiedUserModel.update(updates, { where: { id: keeper.id } });
-      updated += 1;
-    }
-
-    if (idsToDelete.length > 0) {
-      await VerifiedUserModel.destroy({ where: { id: { [Op.in]: idsToDelete } } });
-      removed += idsToDelete.length;
-      logger.warn('Removed duplicate verified user entries to enforce uniqueness.', {
-        influencer,
-        uid,
-        keptId: keeper.id,
-        removedIds: idsToDelete
+  if (orphanedRecords.length > 0) {
+    const orphanedIds = orphanedRecords.map(({ id }) => id).filter(Boolean);
+    if (orphanedIds.length > 0) {
+      await VerifiedUserModel.destroy({ where: { id: { [Op.in]: orphanedIds } } });
+      removed += orphanedIds.length;
+      logger.warn('Removed verified user entries missing influencer or uid keys prior to duplicate cleanup.', {
+        removedIds: orphanedIds
       });
+    }
+  }
+
+  const duplicateGroups = await selectDuplicateGroups(sequelize);
+  if (duplicateGroups.length === 0) {
+    logger.debug('No duplicate verified user records detected.');
+  } else {
+    for (const { influencer, uid } of duplicateGroups) {
+      const records = await loadGroupRecords(sequelize, influencer, uid);
+      if (records.length <= 1) {
+        continue;
+      }
+
+      const { keeper, originalKeeper, duplicates } = mergeRecords(records);
+      const idsToDelete = duplicates.map(({ id }) => id).filter(Boolean);
+      const updates = {};
+
+      for (const field of [...MERGE_FIELDS, 'verifiedAt']) {
+        if (keeper[field] !== undefined && keeper[field] !== originalKeeper[field]) {
+          updates[field] = keeper[field];
+        }
+      }
+
+      if (Object.keys(updates).length > 0) {
+        updates.updatedAt = new Date();
+        await VerifiedUserModel.update(updates, { where: { id: keeper.id } });
+        updated += 1;
+      }
+
+      if (idsToDelete.length > 0) {
+        await VerifiedUserModel.destroy({ where: { id: { [Op.in]: idsToDelete } } });
+        removed += idsToDelete.length;
+        logger.warn('Removed duplicate verified user entries to enforce uniqueness.', {
+          influencer,
+          uid,
+          keptId: keeper.id,
+          removedIds: idsToDelete
+        });
+      }
     }
   }
 

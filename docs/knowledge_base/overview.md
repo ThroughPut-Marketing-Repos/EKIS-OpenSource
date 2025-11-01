@@ -12,6 +12,12 @@ Each interface uses the same verification core so administrators only need to ma
 that can be edited from the database or a JSON file. Logging is powered by Winston and is shared across every module for
 consistent observability.
 
+## Startup maintenance
+
+- The service automatically scans the `verified_users` table for duplicate `(influencer, uid)` pairs during boot. When
+  duplicates are found the richest record is preserved, missing identity information is merged in, and redundant rows are
+  deleted so the unique constraint can be enforced without interrupting startup.
+
 ## Additional resources
 
 - [README](../../README.md) &mdash; comprehensive setup, deployment, and extension guidance plus support contacts for

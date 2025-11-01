@@ -16,6 +16,10 @@ the bot can boot even if manual database edits left behind dangling identifiers.
 - Duplicate groups are reloaded using `IS NULL` aware predicates so rows with missing keys are
   correctly detected. When multiple records share the same `(influencer, uid)` pair the richest
   record is retained, additional metadata is merged into it, and the redundant rows are removed.
+- The helper resolves the physical verified-user table name case-insensitively and temporarily
+  retargets the Sequelize model when legacy deployments still expose the historical `VerifiedUsers`
+  identifier. This ensures duplicate removal always runs before schema migrations regardless of
+  database casing drift.
 - All deletions and updates are logged through the shared Winston logger (`src/utils/logger.js`) to
   make production cleanups auditable.
 
@@ -26,6 +30,8 @@ the bot can boot even if manual database edits left behind dangling identifiers.
 - `volume_snapshots` entries that reference missing exchanges are also normalised by setting their
   `exchangeId` to `NULL`. Snapshot metadata (UID and exchange slug) is preserved so historical
   records remain available for analytics.
+- Like the deduplication routine, foreign key repair automatically retargets the `VerifiedUser`
+  model so legacy table names are handled without manual intervention.
 - Each cleanup run emits either debug logs (when no issues are detected) or a summary info log
   containing the number of repaired references. Truncated lists of affected row IDs are provided in
   warning logs to assist with operational audits without flooding log storage.

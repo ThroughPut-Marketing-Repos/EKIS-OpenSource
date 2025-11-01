@@ -1,4 +1,4 @@
-import { Sequelize, DataTypes } from 'sequelize';
+import { Sequelize, DataTypes, QueryTypes } from 'sequelize';
 import { removeDuplicateVerifiedUsers, removeOrphanedForeignKeys } from '../src/database/maintenance.js';
 
 describe('removeDuplicateVerifiedUsers', () => {
@@ -88,6 +88,68 @@ describe('removeDuplicateVerifiedUsers', () => {
 
     const result = await removeDuplicateVerifiedUsers(sequelize, VerifiedUser);
     expect(result).toEqual({ removed: 0, updated: 0 });
+  });
+
+  it('handles legacy VerifiedUsers table names by retargeting the model', async () => {
+    const queryInterface = sequelize.getQueryInterface();
+
+    await queryInterface.createTable('VerifiedUsers', {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      influencer: { type: DataTypes.STRING },
+      uid: { type: DataTypes.STRING },
+      exchange: { type: DataTypes.STRING },
+      exchangeId: { type: DataTypes.INTEGER },
+      apiKeyId: { type: DataTypes.INTEGER },
+      userId: { type: DataTypes.INTEGER },
+      telegramId: { type: DataTypes.STRING },
+      discordUserId: { type: DataTypes.STRING },
+      guildId: { type: DataTypes.STRING },
+      verifiedAt: { type: DataTypes.BIGINT },
+      createdAt: { type: DataTypes.DATE },
+      updatedAt: { type: DataTypes.DATE },
+      volumeWarningDate: { type: DataTypes.STRING }
+    });
+
+    const baseTimestamp = new Date('2024-01-01T00:00:00Z');
+
+    await queryInterface.bulkInsert('VerifiedUsers', [
+      {
+        influencer: 'casey',
+        uid: 'legacy-1',
+        telegramId: 'tg-casey',
+        verifiedAt: 1000,
+        createdAt: baseTimestamp,
+        updatedAt: baseTimestamp
+      },
+      {
+        influencer: 'casey',
+        uid: 'legacy-1',
+        discordUserId: 'disc-casey',
+        verifiedAt: 5000,
+        createdAt: baseTimestamp,
+        updatedAt: new Date('2024-01-02T00:00:00Z')
+      }
+    ]);
+
+    const result = await removeDuplicateVerifiedUsers(sequelize, VerifiedUser);
+
+    expect(result.removed).toBe(1);
+    expect(result.updated).toBe(1);
+    expect(VerifiedUser.options.tableName).toBe('verified_users');
+
+    const remaining = await sequelize.query(
+      'SELECT influencer, uid, telegramId, discordUserId, verifiedAt FROM "VerifiedUsers"',
+      { type: QueryTypes.SELECT }
+    );
+
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]).toMatchObject({
+      influencer: 'casey',
+      uid: 'legacy-1',
+      telegramId: 'tg-casey',
+      discordUserId: 'disc-casey'
+    });
+    expect(Number(remaining[0].verifiedAt)).toBe(5000);
   });
 
   it('purges duplicate rows that contain NULL influencer or uid keys', async () => {
@@ -238,5 +300,115 @@ describe('removeOrphanedForeignKeys', () => {
       verifiedUsers: { clearedExchangeIds: 0, clearedApiKeyIds: 0 },
       volumeSnapshots: { clearedExchangeIds: 0 }
     });
+  });
+
+  it('repairs foreign keys when the verified users table uses legacy casing', async () => {
+    const legacySequelize = new Sequelize('sqlite::memory:', { logging: false });
+
+    const LegacyVerifiedUser = legacySequelize.define('LegacyVerifiedUser', {
+      influencer: { type: DataTypes.STRING, allowNull: false },
+      uid: { type: DataTypes.STRING, allowNull: false },
+      exchangeId: { type: DataTypes.INTEGER, allowNull: true },
+      apiKeyId: { type: DataTypes.INTEGER, allowNull: true }
+    }, { tableName: 'verified_users' });
+
+    const LegacyVolumeSnapshot = legacySequelize.define('LegacyVolumeSnapshot', {
+      uid: { type: DataTypes.STRING, allowNull: false },
+      exchange: { type: DataTypes.STRING },
+      exchangeId: { type: DataTypes.INTEGER, allowNull: true }
+    }, { tableName: 'volume_snapshots' });
+
+    const legacyQueryInterface = legacySequelize.getQueryInterface();
+
+    await legacyQueryInterface.createTable('VerifiedUsers', {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      influencer: { type: DataTypes.STRING },
+      uid: { type: DataTypes.STRING },
+      exchange: { type: DataTypes.STRING },
+      exchangeId: { type: DataTypes.INTEGER },
+      apiKeyId: { type: DataTypes.INTEGER },
+      userId: { type: DataTypes.INTEGER },
+      telegramId: { type: DataTypes.STRING },
+      discordUserId: { type: DataTypes.STRING },
+      guildId: { type: DataTypes.STRING },
+      verifiedAt: { type: DataTypes.BIGINT },
+      createdAt: { type: DataTypes.DATE },
+      updatedAt: { type: DataTypes.DATE },
+      volumeWarningDate: { type: DataTypes.STRING }
+    });
+
+    await legacyQueryInterface.createTable('exchanges', {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      name: { type: DataTypes.STRING },
+      createdAt: { type: DataTypes.DATE },
+      updatedAt: { type: DataTypes.DATE }
+    });
+
+    await legacyQueryInterface.createTable('api_keys', {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      api_key_hash: { type: DataTypes.STRING },
+      createdAt: { type: DataTypes.DATE },
+      updatedAt: { type: DataTypes.DATE }
+    });
+
+    await legacyQueryInterface.createTable('volume_snapshots', {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      uid: { type: DataTypes.STRING },
+      exchange: { type: DataTypes.STRING },
+      exchangeId: { type: DataTypes.INTEGER },
+      createdAt: { type: DataTypes.DATE },
+      updatedAt: { type: DataTypes.DATE }
+    });
+
+    const timestamp = new Date('2024-01-01T00:00:00Z');
+
+    await legacyQueryInterface.bulkInsert('VerifiedUsers', [
+      {
+        influencer: 'legacy-influencer',
+        uid: 'legacy-uid',
+        exchangeId: 321,
+        apiKeyId: 654,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      }
+    ]);
+
+    await legacyQueryInterface.bulkInsert('volume_snapshots', [
+      {
+        uid: 'legacy-uid',
+        exchange: 'legacy-exchange',
+        exchangeId: 321,
+        createdAt: timestamp,
+        updatedAt: timestamp
+      }
+    ]);
+
+    try {
+      const result = await removeOrphanedForeignKeys(legacySequelize, {
+        VerifiedUser: LegacyVerifiedUser,
+        VolumeSnapshot: LegacyVolumeSnapshot
+      });
+
+      expect(result.verifiedUsers.clearedExchangeIds).toBe(1);
+      expect(result.verifiedUsers.clearedApiKeyIds).toBe(1);
+      expect(result.volumeSnapshots.clearedExchangeIds).toBe(1);
+      expect(LegacyVerifiedUser.options.tableName).toBe('verified_users');
+
+      const verifiedRows = await legacySequelize.query(
+        'SELECT exchangeId, apiKeyId FROM "VerifiedUsers"',
+        { type: QueryTypes.SELECT }
+      );
+
+      const snapshotRows = await legacySequelize.query(
+        'SELECT exchangeId FROM volume_snapshots',
+        { type: QueryTypes.SELECT }
+      );
+
+      expect(verifiedRows[0].exchangeId).toBeNull();
+      expect(verifiedRows[0].apiKeyId).toBeNull();
+      expect(snapshotRows[0].exchangeId).toBeNull();
+    } finally {
+      await legacySequelize.close();
+    }
   });
 });

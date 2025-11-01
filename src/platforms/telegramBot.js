@@ -50,18 +50,18 @@ export const formatVerificationMessage = (result, translator) => {
     translate('common.verification.exchange', { label: exchangeLabel })
   ];
 
-  if (typeof result.volume === 'number' && !Number.isNaN(result.volume)) {
-    lines.push(translate('common.verification.recordedVolume', { volume: result.volume }));
-    if (result.volumeMet === false) {
-      lines.push(translate('common.verification.volumeTargetNotMet', { minimum: result.minimumVolume }));
-    } else if (result.volumeMet === true) {
-      lines.push(translate('common.verification.volumeTargetMet', { minimum: result.minimumVolume }));
-    } else if (result.skipped) {
-      lines.push(translate('common.verification.volumeTargetSkipped', { minimum: result.minimumVolume }));
-    }
-  } else if (result.skipped) {
-    lines.push(translate('common.verification.volumeTrackingDisabled'));
-  }
+  // if (typeof result.volume === 'number' && !Number.isNaN(result.volume)) {
+  //   lines.push(translate('common.verification.recordedVolume', { volume: result.volume }));
+  //   if (result.volumeMet === false) {
+  //     lines.push(translate('common.verification.volumeTargetNotMet', { minimum: result.minimumVolume }));
+  //   } else if (result.volumeMet === true) {
+  //     lines.push(translate('common.verification.volumeTargetMet', { minimum: result.minimumVolume }));
+  //   } else if (result.skipped) {
+  //     lines.push(translate('common.verification.volumeTargetSkipped', { minimum: result.minimumVolume }));
+  //   }
+  // } else if (result.skipped) {
+  //   lines.push(translate('common.verification.volumeTrackingDisabled'));
+  // }
 
   const depositThreshold = result.deposit?.threshold;
   const depositMet = result.deposit?.met !== false;
@@ -94,7 +94,7 @@ export const formatVerificationMessage = (result, translator) => {
     }
   }
 
-  lines.push(translate('common.verification.checkedAt', { timestamp: result.timestamp }));
+  // lines.push(translate('common.verification.checkedAt', { timestamp: result.timestamp }));
   return lines.join('\n');
 };
 

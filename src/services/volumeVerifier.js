@@ -1,6 +1,7 @@
 import axios from 'axios';
 import BlofinService from './blofinService.js';
 import BitunixService from './bitunixService.js';
+import BTCCService from './btccService.js';
 import logger from '../utils/logger.js';
 import { saveSnapshot } from './volumeSnapshotService.js';
 
@@ -158,11 +159,60 @@ const createBitunixClient = (exchangeId, exchangeConfig) => {
   };
 };
 
+const createBTCCClient = (exchangeId, exchangeConfig) => {
+  const { agentOpenId, kolName } = exchangeConfig;
+  const service = new BTCCService(agentOpenId, kolName);
+
+  return {
+    id: exchangeId,
+    type: 'btcc',
+    supportsDepositCheck: true,
+    async getVolume(uid, options = {}) {
+      const depositThreshold = isNumber(options.depositThreshold) ? options.depositThreshold : null;
+      const depositCheckThreshold = depositThreshold ?? 0;
+      const deposit = {
+        threshold: depositThreshold,
+        met: null,
+        source: { type: 'btcc', stage: 'deposit' },
+        evaluatedThreshold: depositCheckThreshold
+      };
+
+      try {
+        const verification = await service.verifyUid(uid, depositCheckThreshold);
+        if (!verification?.verified) {
+          deposit.met = false;
+          deposit.reason = verification?.reason || 'deposit_not_met';
+          deposit.userData = verification?.userData || null;
+          return { volume: 0, source: { type: 'btcc', stage: 'deposit' }, deposit };
+        }
+        deposit.met = true;
+        const totalDeposit = parseFloat(verification?.userData?.balance);
+        if (!Number.isNaN(totalDeposit)) {
+          deposit.amount = totalDeposit;
+        }
+        if (verification?.userData) {
+          deposit.userData = verification.userData;
+        }
+      } catch (error) {
+        deposit.met = false;
+        deposit.reason = 'deposit_check_failed';
+        deposit.error = error?.message;
+        logger.error(`BTCC deposit verification failed for UID ${uid} on ${exchangeId}: ${error?.message || error}`);
+        return { volume: 0, source: { type: 'btcc', stage: 'deposit' }, deposit };
+      }
+
+      const volume = await service.calculateLast30DaysVolume(uid);
+      return { volume, source: { type: 'btcc' }, deposit };
+    }
+  };
+};
+
 const clientFactories = {
   mock: createMockClient,
   rest: createRestClient,
   blofin: createBlofinClient,
-  bitunix: createBitunixClient
+  bitunix: createBitunixClient,
+  btcc: createBTCCClient
 };
 
 export const createVolumeVerifier = (config, dependencies = {}) => {
@@ -339,8 +389,8 @@ export const createVolumeVerifier = (config, dependencies = {}) => {
 
     if (response.passed) {
       const snapshotDepositAmount = typeof deposit.amount === 'number' ? deposit.amount : null;
-      // Blofin and Bitunix clients persist snapshots internally after a successful verification.
-      if (!['blofin', 'bitunix'].includes(client.type)) {
+      // Blofin, Bitunix, and BTCC clients persist snapshots internally after a successful verification.
+      if (!['blofin', 'bitunix', 'btcc'].includes(client.type)) {
         try {
           await saveSnapshot(uid, exchangeId, volume, exchangeConfig.kolName || null, snapshotDepositAmount, response.exchangeDbId);
           logger.debug(`Saved volume snapshot for UID ${uid} on ${exchangeId}.`);

@@ -1415,19 +1415,19 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     ].join('\n'));
   });
 
-  bot.onText(/\/stats(?:@[\w_]+)?(?:\s+(.*))?/, async (msg, match) => {
+  bot.onText(/\/stats(?:@[\w_]+)?(?:\s+([\s\S]*))?/, async (msg, match) => {
     await handleStatsCommand(msg, match?.[1]);
   });
 
-  bot.onText(/\/settings(?:@[\w_]+)?(?:\s+(.*))?/, async (msg, match) => {
+  bot.onText(/\/settings(?:@[\w_]+)?(?:\s+([\s\S]*))?/, async (msg, match) => {
     await handleSettingsCommand(msg, match?.[1]);
   });
 
-  bot.onText(/\/owner(?:@[\w_]+)?(?:\s+(.*))?/, async (msg, match) => {
+  bot.onText(/\/owner(?:@[\w_]+)?(?:\s+([\s\S]*))?/, async (msg, match) => {
     await handleOwnerCommand(msg, match?.[1]);
   });
 
-  bot.onText(/\/setupgroup(?:@[\w_]+)?(?:\s+(.*))?/, async (msg, match) => {
+  bot.onText(/\/setupgroup(?:@[\w_]+)?(?:\s+([\s\S]*))?/, async (msg, match) => {
     await handleGroupSetupCommand(msg, match?.[1]);
   });
 

@@ -50,15 +50,11 @@ environment variables. The configuration structure is:
     "volumeCheckDays": 30,
     "volumeWarningEnabled": true,
     "volumeWarningDays": 2,
-    "defaultExchange": "mock",
+    "defaultExchange": "blofin",
     "exchanges": {
-      "mock": {
-        "type": "mock",
-        "description": "Static mock volumes used for development and testing.",
-        "volumes": {
-          "demo-user": 2500,
-          "new-user": 500
-        }
+      "blofin": {
+        "type": "blofin",
+        "description": "Blofin exchange integration. Provide API credentials via the database or environment overrides."
       }
     }
   }
@@ -104,7 +100,9 @@ stored verbatim in the database while logs only display masked previews for secu
 
 `verification.exchanges` is a keyed object where the key represents the exchange identifier used in commands and API
 calls. Entries inserted through the database are merged into this object and expose the raw credential data for use by
-custom services. The built-in verifier understands the following exchange types:
+custom services. The bundled configuration ships with a Blofin placeholder so fresh installations can bootstrap quickly,
+but you are encouraged to replace it with live credentials via the `/settings api` workflow or direct database updates.
+The built-in verifier understands the following exchange types:
 
 - `mock` &ndash; Uses static volumes stored in the configuration file. Ideal for development or demo communities.
 - `rest` &ndash; Queries an HTTP endpoint using Axios. The configuration requires `apiBaseUrl`, can optionally set

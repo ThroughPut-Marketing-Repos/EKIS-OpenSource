@@ -84,7 +84,8 @@ only while still performing affiliate and deposit validation.
 
 Use `/settings start_message` to override the greeting that appears after `/start` (and when only one exchange is available).
 The command accepts free-form text and supports the placeholders shown below. Escaped `\n` sequences become real newlines
-when the message is saved. Send `clear`, `none`, `default`, or `reset` to restore the built-in copy.
+when the message is saved, and literal line breaks typed into the command are preserved so bullet lists and spacing remain
+intact. Send `clear`, `none`, `default`, or `reset` to restore the built-in copy.
 
 | Placeholder | Description |
 |-------------|-------------|

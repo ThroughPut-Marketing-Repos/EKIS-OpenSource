@@ -1382,10 +1382,23 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
 
   bot.onText(/\/start/i, async (msg) => {
     const chatId = msg.chat.id;
+    const chatType = msg.chat?.type || 'unknown';
     logger.info('Received /start command from Telegram user.', {
       telegramUserId: msg.from?.id,
-      chatId
+      chatId,
+      chatType
     });
+
+    if (chatType !== 'private') {
+      logger.info('Ignored Telegram /start command outside a direct message.', {
+        telegramUserId: msg.from?.id,
+        chatId,
+        chatType
+      });
+      await bot.sendMessage(chatId, translate('telegram.verification.dmRequired'));
+      return;
+    }
+
     await sendExchangePrompt(chatId);
   });
 
@@ -1507,7 +1520,22 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     }
 
     const chatId = message.chat.id;
+    const chatType = message.chat?.type || 'unknown';
     const exchangeId = data.split(':')[1];
+
+    if (chatType !== 'private') {
+      await acknowledge({
+        text: translate('telegram.verification.dmRequired'),
+        show_alert: true
+      });
+      logger.warn('Received Telegram exchange selection from non-private chat. Ignoring.', {
+        telegramUserId: message.from?.id,
+        chatId,
+        chatType,
+        exchangeId
+      });
+      return;
+    }
 
     await acknowledge();
 
@@ -1564,10 +1592,20 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     }
 
     const chatId = msg.chat.id;
+    const chatType = msg.chat?.type || 'unknown';
     let session = sessions.get(chatId);
 
     if (msg.text.startsWith('/start')) {
       // The /start handler already processed this message.
+      return;
+    }
+
+    if (chatType !== 'private') {
+      logger.debug('Ignoring Telegram message outside a direct chat for verification handling.', {
+        telegramUserId: msg.from?.id,
+        chatId,
+        chatType
+      });
       return;
     }
 

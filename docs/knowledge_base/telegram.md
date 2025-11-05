@@ -7,7 +7,9 @@
 
 1. A user sends `/start` to the bot via direct message (use `/help` at any time to review available commands and examples). If a
    user sends their UID before `/start`, the bot automatically selects the default exchange (or the only configured exchange)
-   and continues the verification flow without forcing them to resend the value.
+   and continues the verification flow without forcing them to resend the value. Verification messages posted in groups or
+   channels are ignored so regular conversations are not interrupted, and `/start` in those contexts prompts the user to
+   move the conversation to a direct message.
 2. The bot lists every configured exchange as inline buttons (this step is skipped when only one exchange is available).
 3. After the user selects an exchange &mdash; or immediately when only one exchange is configured &mdash; the bot prompts for their UID.
    Single-exchange deployments explicitly mention the default exchange in the greeting before asking for the UID so the

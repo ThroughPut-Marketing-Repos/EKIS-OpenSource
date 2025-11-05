@@ -418,6 +418,23 @@
         "Code: {{ code }}",
         "The code remains active for you to reuse within the original validity window."
       ],
+      "anonymousPostDetected": "I detected this setup code was posted anonymously. I've asked the issuing administrator to confirm it via DM.",
+      "anonymousConfirmationPrompt": [
+        "⚠️ Anonymous setup attempt detected.",
+        "Code: {{ code }}",
+        "Space: {{ title }} ({{ identifier }})",
+        "",
+        "If this was you, tap Approve below or send {{ command }} to confirm.",
+        "The link will expire when the setup code does."
+      ],
+      "anonymousConfirmationButton": "Approve group link",
+      "confirmUsage": "Usage: /setupgroup confirm <code> [chatId]",
+      "confirmCodeNotFound": "I could not find an active setup code matching {{ code }}.",
+      "confirmWrongAdmin": "Only the administrator who generated this setup code can confirm it.",
+      "confirmExpired": "Setup code {{ code }} expired before it could be confirmed. Please generate a new one.",
+      "confirmMissingConfirmation": "I could not find a confirmation request for that code. Post it in the target space again so I can verify it.",
+      "confirmChatMismatch": "This confirmation request targets a different space (chat ID {{ expected }}).",
+      "confirmAccepted": "Group link approved. I'll update the configuration now.",
       "alreadyLinked": "ℹ️ This space is already linked. No changes were required, you can delete this code.",
       "alreadyLinkedNotification": [
         "This group was already on the invite list.",
@@ -449,7 +466,7 @@
         "Available commands:",
         "• /start – Begin the verification flow. Usage: /start",
         "• /help – Display this command reference. Usage: /help",
-        "• /setupgroup – Link a new Telegram group or channel (admins only). Usage: /setupgroup",
+        "• /setupgroup – Link a new Telegram group or channel (admins only). Usage: /setupgroup | /setupgroup cancel | /setupgroup confirm <code> <chatId>",
         "• /settings – Manage verification settings (admins only). Usage: /settings show",
         "• /stats – Display trading volume statistics (admins only). Usage: /stats [exchange|all]",
         "• /owner – Manage bot ownership and admin access (owner only). Usage: /owner list-admins"

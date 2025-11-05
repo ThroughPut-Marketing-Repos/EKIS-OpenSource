@@ -489,3 +489,141 @@ describe('telegram verification invites', () => {
     }));
   });
 });
+
+describe('telegram setupgroup anonymous confirmation', () => {
+  let telegramConfig;
+  let volumeVerifier;
+  let configUpdater;
+  let handlers;
+  let textHandlers;
+
+  const getSetupHandler = () => {
+    const entry = textHandlers.find(({ pattern }) => pattern.toString() === '/\\/setupgroup(?:@[\\w_]+)?(?:\\s+(.*))?/');
+    return entry?.handler;
+  };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    handlers = {};
+    textHandlers = [];
+    onMock.mockImplementation((event, handler) => {
+      handlers[event] = handler;
+    });
+    onTextMock.mockImplementation((pattern, handler) => {
+      textHandlers.push({ pattern, handler });
+    });
+    sendMessageMock.mockResolvedValue();
+    answerCallbackQueryMock.mockResolvedValue();
+
+    telegramConfig = { enabled: true, token: 'token', admins: ['42'], ownerId: null, groupIds: [] };
+    volumeVerifier = { getExchanges: jest.fn().mockReturnValue([]), verify: jest.fn() };
+    configUpdater = { addTelegramGroup: jest.fn().mockResolvedValue({ groupIds: [] }) };
+
+    createTelegramBot(telegramConfig, volumeVerifier, { translator, configUpdater });
+  });
+
+  it('requires confirmation for anonymous admin posts and links after approval', async () => {
+    const setupHandler = getSetupHandler();
+    expect(setupHandler).toBeDefined();
+
+    const adminChatId = 500;
+    const adminId = 42;
+
+    await setupHandler(
+      { chat: { id: adminChatId, type: 'private' }, from: { id: adminId }, text: '/setupgroup' },
+      [null, undefined]
+    );
+
+    const lastCall = sendMessageMock.mock.calls[sendMessageMock.mock.calls.length - 1];
+    const codeMatch = lastCall[1].match(/code \(valid for .* minutes\): ([A-Z0-9]+)/i);
+    expect(codeMatch).not.toBeNull();
+    const code = codeMatch[1];
+
+    sendMessageMock.mockClear();
+
+    const groupChatId = -1001234567;
+    configUpdater.addTelegramGroup.mockResolvedValue({ groupIds: ['@anonspace'] });
+
+    const messageHandler = handlers.message;
+    expect(messageHandler).toBeDefined();
+    await messageHandler({
+      chat: { id: groupChatId, type: 'supergroup', title: 'Anon Group', username: 'anonspace' },
+      sender_chat: { id: groupChatId, type: 'supergroup', title: 'Anon Group' },
+      from: { id: 1087968824, username: 'GroupAnonymousBot' },
+      text: code
+    });
+
+    expect(sendMessageMock.mock.calls).toHaveLength(2);
+    const [groupPrompt, adminPrompt] = sendMessageMock.mock.calls;
+
+    expect(groupPrompt[0]).toEqual(groupChatId);
+    expect(groupPrompt[1]).toContain('posted anonymously');
+
+    expect(adminPrompt[0]).toEqual(adminChatId);
+    expect(adminPrompt[1]).toContain(`/setupgroup confirm ${code} ${groupChatId}`);
+    expect(adminPrompt[2]).toEqual(expect.objectContaining({
+      disable_web_page_preview: true,
+      reply_markup: {
+        inline_keyboard: [[expect.objectContaining({
+          callback_data: `confirm_group:${code}:${groupChatId}`,
+          text: 'Approve group link'
+        })]]
+      }
+    }));
+
+    const initialCallCount = sendMessageMock.mock.calls.length;
+
+    const confirmCommand = `/setupgroup confirm ${code} ${groupChatId}`;
+    await setupHandler(
+      { chat: { id: adminChatId, type: 'private' }, from: { id: adminId }, text: confirmCommand },
+      [null, `confirm ${code} ${groupChatId}`]
+    );
+
+    expect(configUpdater.addTelegramGroup).toHaveBeenCalledWith({ groupId: '@anonspace', label: 'Anon Group' });
+
+    const newCalls = sendMessageMock.mock.calls.slice(initialCallCount);
+    const groupSuccess = newCalls.find(([target]) => target === groupChatId);
+    const adminSuccess = newCalls.find(([target]) => target === adminChatId && target !== groupChatId);
+
+    expect(groupSuccess?.[1]).toContain('space is now linked');
+    expect(adminSuccess?.[1]).toContain('Group linked successfully!');
+  });
+
+  it('rejects setup codes posted by unauthorised users', async () => {
+    const setupHandler = getSetupHandler();
+    expect(setupHandler).toBeDefined();
+
+    const adminChatId = 600;
+    const adminId = 42;
+
+    await setupHandler(
+      { chat: { id: adminChatId, type: 'private' }, from: { id: adminId }, text: '/setupgroup' },
+      [null, undefined]
+    );
+
+    const lastCall = sendMessageMock.mock.calls[sendMessageMock.mock.calls.length - 1];
+    const codeMatch = lastCall[1].match(/code \(valid for .* minutes\): ([A-Z0-9]+)/i);
+    const code = codeMatch[1];
+
+    sendMessageMock.mockClear();
+
+    const groupChatId = -200987654;
+    const messageHandler = handlers.message;
+    expect(messageHandler).toBeDefined();
+    await messageHandler({
+      chat: { id: groupChatId, type: 'supergroup', title: 'Open Group' },
+      from: { id: 999 },
+      text: code
+    });
+
+    expect(configUpdater.addTelegramGroup).not.toHaveBeenCalled();
+    expect(sendMessageMock.mock.calls).toHaveLength(2);
+    const [groupWarning, adminWarning] = sendMessageMock.mock.calls;
+
+    expect(groupWarning[0]).toEqual(groupChatId);
+    expect(groupWarning[1]).toContain('Only the administrator who generated this setup code');
+
+    expect(adminWarning[0]).toEqual(adminChatId);
+    expect(adminWarning[1]).toContain('sender ID did not match your account');
+  });
+});

@@ -5,7 +5,9 @@
 
 ## Usage
 
-1. A user sends `/start` to the bot via direct message (use `/help` at any time to review available commands and examples).
+1. A user sends `/start` to the bot via direct message (use `/help` at any time to review available commands and examples). If a
+   user sends their UID before `/start`, the bot automatically selects the default exchange (or the only configured exchange)
+   and continues the verification flow without forcing them to resend the value.
 2. The bot lists every configured exchange as inline buttons (this step is skipped when only one exchange is available).
 3. After the user selects an exchange &mdash; or immediately when only one exchange is configured &mdash; the bot prompts for their UID.
    Single-exchange deployments explicitly mention the default exchange in the greeting before asking for the UID so the
@@ -67,6 +69,7 @@ manage settings even when not explicitly listed in the admin array:
 /settings api remove <name>
 /settings api list
 /settings affiliate <exchange> <url|clear>
+/settings start_message <text|clear>
 /settings show
 ```
 
@@ -74,6 +77,23 @@ All successful updates persist to the database through `configUpdateService`, in
 refresh the shared `volumeVerifier` instance so new verification requests honour the modified settings immediately. When
 the trading volume check is disabled, the verification responses explicitly state that the volume target is informational
 only while still performing affiliate and deposit validation.
+
+### Customising the /start message
+
+Use `/settings start_message` to override the greeting that appears after `/start` (and when only one exchange is available).
+The command accepts free-form text and supports the placeholders shown below. Escaped `\n` sequences become real newlines
+when the message is saved. Send `clear`, `none`, `default`, or `reset` to restore the built-in copy.
+
+| Placeholder | Description |
+|-------------|-------------|
+| `{{ exchange }}` | Replaced with the selected exchange label. |
+| `{{ deposit }}` | Replaced with the numeric deposit threshold, when available. |
+| `{{ minimumDepositLine }}` | Replaced with the translated minimum deposit sentence if the threshold is set. |
+| `{{ affiliateLink }}` | Replaced with the affiliate URL, when configured. |
+| `{{ affiliateLinkLine }}` | Replaced with the translated affiliate link sentence, when an URL exists. |
+
+When the saved message does not reference `{{ affiliateLink }}` or `{{ affiliateLinkLine }}` the bot appends the translated
+affiliate link prompt automatically so users still receive the link during verification.
 
 ## Trading statistics
 

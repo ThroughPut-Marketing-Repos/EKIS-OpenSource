@@ -32,6 +32,7 @@ environment variables. The configuration structure is:
   "telegram": {
     "enabled": false,
     "token": "YOUR_TELEGRAM_BOT_TOKEN",
+    "startMessage": "",
     "joinMessage": "",
     "admins": [],
     "groupId": "",
@@ -80,6 +81,7 @@ environment variables override the configuration when present:
 | `DISCORD_APPLICATION_ID` | Overrides `discord.applicationId`. |
 | `DISCORD_GUILD_ID` | Overrides `discord.guildId`. |
 | `TELEGRAM_BOT_TOKEN` | Overrides `telegram.token`. |
+| `TELEGRAM_START_MESSAGE` | Overrides `telegram.startMessage`. Accepts raw text. Use `\n` for explicit line breaks. |
 | `TELEGRAM_JOIN_MESSAGE` | Overrides `telegram.joinMessage`. |
 | `TELEGRAM_GROUP_ID` | Overrides `telegram.groupId`. Accepts comma-separated values which are also exposed via `telegram.groupIds`. |
 | `TELEGRAM_GROUP_IDS` | Overrides `telegram.groupIds`. Accepts JSON arrays or comma-separated values. |

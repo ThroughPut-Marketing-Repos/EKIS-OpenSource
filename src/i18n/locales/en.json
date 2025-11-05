@@ -293,6 +293,7 @@
         "/settings volume_days <days>",
         "/settings volume_warning <on|off>",
         "/settings warning_days <days>",
+        "/settings start_message <text|clear>",
         "/settings api add <name> <type> <key> <secret> [passphrase]",
         "/settings api update <name> <type> <key> <secret> [passphrase]",
         "/settings api remove <name>",
@@ -309,6 +310,9 @@
       "volumeWarningEnabled": "Volume warning notifications have been enabled.",
       "volumeWarningDisabled": "Volume warning notifications have been disabled.",
       "warningDaysUpdated": "Warning lead time updated to {{ days }} days.",
+      "startMessageUsage": "Usage: /settings start_message <text|clear>",
+      "startMessageUpdated": "Start message updated. Future verifications will use the new message after /start.",
+      "startMessageCleared": "Start message cleared. The default message will be used after /start.",
       "api": {
         "usageAddUpdate": "Usage: /settings api add|update <name> <type> <key> <secret> [passphrase]",
         "usageRemove": "Usage: /settings api remove <name>",

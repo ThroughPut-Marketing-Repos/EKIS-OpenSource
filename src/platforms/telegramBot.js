@@ -705,6 +705,10 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
   // the one-time code and contains metadata so we can validate who issued the request and
   // whether the code is still valid when it appears inside a group conversation.
   const pendingGroupLinks = new Map();
+  // Track anonymous admin confirmation requests when Telegram hides the issuer's identity.
+  // These entries remain active until the owner explicitly approves or the original setup
+  // code expires, whichever occurs first.
+  const pendingAnonymousConfirmations = new Map();
   const configUpdater = dependencies.configUpdater || configUpdateService;
 
   const generateGroupSetupCode = () => {
@@ -723,6 +727,13 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     for (const [code, record] of pendingGroupLinks.entries()) {
       if (record.expiresAt <= now) {
         pendingGroupLinks.delete(code);
+        pendingAnonymousConfirmations.delete(code);
+      }
+    }
+
+    for (const [code, confirmation] of pendingAnonymousConfirmations.entries()) {
+      if (confirmation.expiresAt <= now || !pendingGroupLinks.has(code)) {
+        pendingAnonymousConfirmations.delete(code);
       }
     }
   };
@@ -973,6 +984,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     if (args.length && args[0].toLowerCase() === 'cancel') {
       if (existing) {
         pendingGroupLinks.delete(existing.code);
+        pendingAnonymousConfirmations.delete(existing.code);
         const adminReplyOptions = {};
         if (msg.message_thread_id) {
           adminReplyOptions.message_thread_id = msg.message_thread_id;
@@ -988,8 +1000,73 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       return;
     }
 
+    if (args.length && args[0].toLowerCase() === 'confirm') {
+      const rawCode = args[1];
+      if (!rawCode) {
+        await bot.sendMessage(msg.chat.id, translate('telegram.setupGroup.confirmUsage'));
+        return;
+      }
+
+      const code = String(rawCode).toUpperCase();
+      const pendingRecord = pendingGroupLinks.get(code);
+
+      if (!pendingRecord) {
+        await bot.sendMessage(msg.chat.id, translate('telegram.setupGroup.confirmCodeNotFound', { code }));
+        return;
+      }
+
+      if (pendingRecord.adminId !== String(adminId)) {
+        await bot.sendMessage(msg.chat.id, translate('telegram.setupGroup.confirmWrongAdmin'));
+        return;
+      }
+
+      const now = Date.now();
+      if (pendingRecord.expiresAt <= now) {
+        pendingGroupLinks.delete(code);
+        pendingAnonymousConfirmations.delete(code);
+        await bot.sendMessage(msg.chat.id, translate('telegram.setupGroup.confirmExpired', { code }));
+        return;
+      }
+
+      const confirmation = pendingAnonymousConfirmations.get(code);
+      if (!confirmation) {
+        await bot.sendMessage(msg.chat.id, translate('telegram.setupGroup.confirmMissingConfirmation'));
+        return;
+      }
+
+      if (args[2]) {
+        const expectedChatId = String(confirmation.chatId);
+        if (String(args[2]) !== expectedChatId) {
+          await bot.sendMessage(
+            msg.chat.id,
+            translate('telegram.setupGroup.confirmChatMismatch', { expected: expectedChatId })
+          );
+          return;
+        }
+      }
+
+      await finaliseGroupLink({
+        code,
+        record: pendingRecord,
+        chatId: confirmation.chatId,
+        chatType: confirmation.chatType,
+        groupIdentifier: confirmation.groupIdentifier,
+        chatTitle: confirmation.chatTitle,
+        initiatorId: String(adminId)
+      });
+
+      logger.info('Telegram admin approved anonymous setup code via confirmation command.', {
+        telegramUserId: adminId,
+        code,
+        chatId: confirmation.chatId
+      });
+
+      return;
+    }
+
     if (existing) {
       pendingGroupLinks.delete(existing.code);
+      pendingAnonymousConfirmations.delete(existing.code);
     }
 
     const code = generateGroupSetupCode();
@@ -1041,70 +1118,25 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     });
   };
 
-  const handleGroupSetupCodeMessage = async (msg, code, record) => {
-    const chatId = msg.chat?.id;
-    if (!chatId) {
-      return;
-    }
-
-    const chatType = msg.chat?.type || 'unknown';
-    if (!['group', 'supergroup', 'channel'].includes(chatType)) {
-      await bot.sendMessage(chatId, 'This setup code must be posted inside the group or channel you would like to link.');
-      return;
-    }
-
-    const now = Date.now();
-    if (record.expiresAt <= now) {
-      pendingGroupLinks.delete(code);
-      await bot.sendMessage(chatId, 'This setup code has expired. Please run /setupgroup again to generate a fresh one.');
-      if (record.adminChatId) {
-        const adminReplyOptions = { disable_web_page_preview: true };
-        if (record.messageThreadId) {
-          adminReplyOptions.message_thread_id = record.messageThreadId;
-        }
-        await bot.sendMessage(record.adminChatId, `The setup code ${code} expired before it was used.`, adminReplyOptions);
-      }
-      return;
-    }
-
-    const senderId = msg.from?.id ? String(msg.from.id) : null;
-    if (!senderId) {
-      await bot.sendMessage(chatId, 'Please post the setup code from your personal account so I can confirm your admin access.');
-      return;
-    }
-
-    if (senderId !== record.adminId) {
-      await bot.sendMessage(chatId, 'Only the administrator who generated this setup code can complete the link. Ask them to post it directly.');
-      if (record.adminChatId) {
-        const adminReplyOptions = { disable_web_page_preview: true };
-        if (record.messageThreadId) {
-          adminReplyOptions.message_thread_id = record.messageThreadId;
-        }
-        await bot.sendMessage(record.adminChatId, [
-          'Heads up: someone attempted to use your setup code but the sender ID did not match your account.',
-          `Code: ${code}`,
-          'The code remains active for you to reuse within the original validity window.'
-        ].join('\n'), adminReplyOptions);
-      }
-      return;
-    }
-
-    const groupIdentifier = msg.chat?.username ? `@${msg.chat.username}` : String(chatId);
-    const chatTitle = msg.chat?.title || msg.chat?.username || groupIdentifier;
+  const finaliseGroupLink = async ({ code, record, chatId, chatType, groupIdentifier, chatTitle, initiatorId }) => {
     const existingGroups = normaliseGroupIds(telegramConfig);
 
     if (existingGroups.includes(groupIdentifier)) {
       pendingGroupLinks.delete(code);
-      await bot.sendMessage(chatId, 'ℹ️ This space is already linked. No changes were required, you can delete this code.');
+      pendingAnonymousConfirmations.delete(code);
+
+      await bot.sendMessage(chatId, translate('telegram.setupGroup.alreadyLinked'));
+
       if (record.adminChatId) {
         const adminReplyOptions = { disable_web_page_preview: true };
         if (record.messageThreadId) {
           adminReplyOptions.message_thread_id = record.messageThreadId;
         }
-        await bot.sendMessage(record.adminChatId, [
-          'This group was already on the invite list.',
-          `Identifier: ${groupIdentifier}`
-        ].join('\n'), adminReplyOptions);
+        await bot.sendMessage(
+          record.adminChatId,
+          translate('telegram.setupGroup.alreadyLinkedNotification', { identifier: groupIdentifier }).join('\n'),
+          adminReplyOptions
+        );
       }
       return;
     }
@@ -1114,52 +1146,170 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       telegramConfig.groupIds = groupIds;
       telegramConfig.groupId = groupIds.length ? groupIds[0] : '';
       pendingGroupLinks.delete(code);
+      pendingAnonymousConfirmations.delete(code);
 
-      await bot.sendMessage(chatId, [
-        '✅ Thanks! This space is now linked to the verification flow.',
-        'Verified members will automatically receive single-use invite links here.',
-        'You can safely delete this setup code message.'
-      ].join('\n'));
+      await bot.sendMessage(chatId, translate('telegram.setupGroup.linkSuccess').join('\n'));
 
       if (record.adminChatId && record.adminChatId !== chatId) {
         const adminReplyOptions = { disable_web_page_preview: true };
         if (record.messageThreadId) {
           adminReplyOptions.message_thread_id = record.messageThreadId;
         }
-        await bot.sendMessage(record.adminChatId, [
-          '🎉 Group linked successfully!',
-          `• Title: ${chatTitle}`,
-          `• Identifier: ${groupIdentifier}`,
-          '',
-          'Invite links for verified members will now include this space automatically.',
-          'Run /setupgroup again whenever you need to add another group or channel.'
-        ].join('\n'), adminReplyOptions);
+        await bot.sendMessage(
+          record.adminChatId,
+          translate('telegram.setupGroup.linkSuccessNotification', {
+            title: chatTitle,
+            identifier: groupIdentifier
+          }).join('\n'),
+          adminReplyOptions
+        );
       }
 
       logger.info('Telegram group linked via setup code.', {
         code,
         groupId: groupIdentifier,
         chatType,
-        telegramUserId: senderId
+        telegramUserId: initiatorId || record.adminId
       });
     } catch (error) {
       pendingGroupLinks.delete(code);
+      pendingAnonymousConfirmations.delete(code);
       const message = error?.message || 'Unknown error while saving the group.';
       logger.error(`Failed to persist Telegram group ${groupIdentifier}: ${message}`);
-      await bot.sendMessage(chatId, `⚠️ I could not save this space: ${message}`);
+      await bot.sendMessage(chatId, translate('telegram.setupGroup.linkFailed', { message }));
       if (record.adminChatId) {
         const adminReplyOptions = { disable_web_page_preview: true };
         if (record.messageThreadId) {
           adminReplyOptions.message_thread_id = record.messageThreadId;
         }
-        await bot.sendMessage(record.adminChatId, [
-          '⚠️ Something went wrong while saving that group.',
-          `Error: ${message}`,
-          '',
-          'Please resolve the issue and run /setupgroup again when ready.'
-        ].join('\n'), adminReplyOptions);
+        await bot.sendMessage(
+          record.adminChatId,
+          translate('telegram.setupGroup.linkFailedNotification', { message }).join('\n'),
+          adminReplyOptions
+        );
       }
     }
+  };
+
+  const handleGroupSetupCodeMessage = async (msg, code, record) => {
+    const chatId = msg.chat?.id;
+    if (!chatId) {
+      return;
+    }
+
+    const chatType = msg.chat?.type || 'unknown';
+    if (!['group', 'supergroup', 'channel'].includes(chatType)) {
+      await bot.sendMessage(chatId, translate('telegram.setupGroup.codePostedInWrongPlace'));
+      return;
+    }
+
+    const now = Date.now();
+    if (record.expiresAt <= now) {
+      pendingGroupLinks.delete(code);
+      pendingAnonymousConfirmations.delete(code);
+      await bot.sendMessage(chatId, translate('telegram.setupGroup.codeExpired'));
+      if (record.adminChatId) {
+        const adminReplyOptions = { disable_web_page_preview: true };
+        if (record.messageThreadId) {
+          adminReplyOptions.message_thread_id = record.messageThreadId;
+        }
+        await bot.sendMessage(
+          record.adminChatId,
+          translate('telegram.setupGroup.codeExpiredNotification', { code }),
+          adminReplyOptions
+        );
+      }
+      return;
+    }
+
+    const senderId = msg.from?.id ? String(msg.from.id) : null;
+    if (!senderId) {
+      await bot.sendMessage(chatId, translate('telegram.setupGroup.postFromPersonalAccount'));
+      return;
+    }
+
+    const groupIdentifier = msg.chat?.username ? `@${msg.chat.username}` : String(chatId);
+    const chatTitle = msg.chat?.title || msg.chat?.username || groupIdentifier;
+    const isAnonymousSender = msg.sender_chat?.id === chatId
+      || msg.sender_chat?.type === 'channel'
+      || msg.from?.username === 'GroupAnonymousBot';
+
+    if (senderId !== record.adminId && !isAnonymousSender) {
+      await bot.sendMessage(chatId, translate('telegram.setupGroup.wrongSender'));
+      if (record.adminChatId) {
+        const adminReplyOptions = { disable_web_page_preview: true };
+        if (record.messageThreadId) {
+          adminReplyOptions.message_thread_id = record.messageThreadId;
+        }
+        await bot.sendMessage(
+          record.adminChatId,
+          translate('telegram.setupGroup.wrongSenderNotification', { code }).join('\n'),
+          adminReplyOptions
+        );
+      }
+      return;
+    }
+
+    if (senderId !== record.adminId && isAnonymousSender) {
+      pendingAnonymousConfirmations.set(code, {
+        code,
+        adminId: record.adminId,
+        chatId,
+        chatType,
+        groupIdentifier,
+        chatTitle,
+        expiresAt: record.expiresAt
+      });
+
+      await bot.sendMessage(chatId, translate('telegram.setupGroup.anonymousPostDetected'));
+
+      if (record.adminChatId) {
+        const adminReplyOptions = { disable_web_page_preview: true };
+        if (record.messageThreadId) {
+          adminReplyOptions.message_thread_id = record.messageThreadId;
+        }
+        const confirmCommand = `/setupgroup confirm ${code} ${chatId}`;
+        const confirmationLines = translate('telegram.setupGroup.anonymousConfirmationPrompt', {
+          code,
+          title: chatTitle,
+          identifier: groupIdentifier,
+          command: confirmCommand
+        });
+        await bot.sendMessage(
+          record.adminChatId,
+          Array.isArray(confirmationLines) ? confirmationLines.join('\n') : confirmationLines,
+          {
+            ...adminReplyOptions,
+            reply_markup: {
+              inline_keyboard: [[{
+                text: translate('telegram.setupGroup.anonymousConfirmationButton'),
+                callback_data: `confirm_group:${code}:${chatId}`
+              }]]
+            }
+          }
+        );
+      }
+
+      logger.info('Telegram setup code redemption requires admin confirmation due to anonymous sender.', {
+        code,
+        chatId,
+        chatType,
+        telegramUserId: senderId,
+        adminId: record.adminId
+      });
+
+      return;
+    }
+
+    await finaliseGroupLink({
+      code,
+      record,
+      chatId,
+      chatType,
+      groupIdentifier,
+      chatTitle,
+      initiatorId: senderId
+    });
   };
 
   bot.onText(/\/start/i, async (msg) => {
@@ -1201,7 +1351,89 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
   });
 
   bot.on('callback_query', async (callbackQuery) => {
-    const { message, data, id } = callbackQuery;
+    const { message, data, id, from } = callbackQuery;
+
+    const acknowledge = async (payload) => {
+      try {
+        await bot.answerCallbackQuery(id, payload);
+      } catch (error) {
+        logger.warn(`Failed to acknowledge callback query: ${error.message}`);
+      }
+    };
+
+    if (data?.startsWith('confirm_group:')) {
+      const [, rawCode, targetChatId] = data.split(':');
+      const code = String(rawCode || '').toUpperCase();
+      const pendingRecord = pendingGroupLinks.get(code);
+
+      if (!pendingRecord) {
+        await acknowledge({
+          text: translate('telegram.setupGroup.confirmCodeNotFound', { code }),
+          show_alert: true
+        });
+        return;
+      }
+
+      if (pendingRecord.adminId !== String(from?.id)) {
+        await acknowledge({
+          text: translate('telegram.setupGroup.confirmWrongAdmin'),
+          show_alert: true
+        });
+        return;
+      }
+
+      const now = Date.now();
+      if (pendingRecord.expiresAt <= now) {
+        pendingGroupLinks.delete(code);
+        pendingAnonymousConfirmations.delete(code);
+        await acknowledge({
+          text: translate('telegram.setupGroup.confirmExpired', { code }),
+          show_alert: true
+        });
+        return;
+      }
+
+      const confirmation = pendingAnonymousConfirmations.get(code);
+      if (!confirmation) {
+        await acknowledge({
+          text: translate('telegram.setupGroup.confirmMissingConfirmation'),
+          show_alert: true
+        });
+        return;
+      }
+
+      const expectedChatId = String(confirmation.chatId);
+      if (targetChatId && targetChatId !== expectedChatId) {
+        await acknowledge({
+          text: translate('telegram.setupGroup.confirmChatMismatch', { expected: expectedChatId }),
+          show_alert: true
+        });
+        return;
+      }
+
+      await finaliseGroupLink({
+        code,
+        record: pendingRecord,
+        chatId: confirmation.chatId,
+        chatType: confirmation.chatType,
+        groupIdentifier: confirmation.groupIdentifier,
+        chatTitle: confirmation.chatTitle,
+        initiatorId: String(from?.id)
+      });
+
+      logger.info('Telegram admin approved anonymous setup code via callback confirmation.', {
+        telegramUserId: from?.id,
+        code,
+        chatId: confirmation.chatId
+      });
+
+      await acknowledge({
+        text: translate('telegram.setupGroup.confirmAccepted'),
+        show_alert: false
+      });
+      return;
+    }
+
     if (!message?.chat || !data?.startsWith('exchange:')) {
       return;
     }
@@ -1209,11 +1441,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     const chatId = message.chat.id;
     const exchangeId = data.split(':')[1];
 
-    try {
-      await bot.answerCallbackQuery(id);
-    } catch (error) {
-      logger.warn(`Failed to acknowledge callback query: ${error.message}`);
-    }
+    await acknowledge();
 
     const exchanges = volumeVerifier.getExchanges ? volumeVerifier.getExchanges() : [];
     const selectedExchange = exchanges.find((exchange) => exchange.id === exchangeId);

@@ -37,7 +37,8 @@ verification flow. The bot replies with a detailed checklist:
 
 1. Add the bot as an administrator in the destination space with permission to create invite links.
 2. Post the generated setup code inside that space. The code expires after 15 minutes and only the admin who created it can
-   complete the process.
+   complete the process. If Telegram masks their identity (anonymous admin or "post as channel" mode), the bot DM's them
+   with an approval prompt instead of linking automatically.
 3. The bot confirms the link both in the group and via direct message, then persists the chat ID in the configuration so
    future verifications automatically create invite links for the new destination.
 
@@ -45,8 +46,10 @@ Successful links appear immediately in `/settings show`, confirming that the con
 used for subsequent verification sessions even after restarts.
 
 Use `/setupgroup cancel` to invalidate an unused code. If someone else attempts to reuse an active code, the bot informs the
-requesting admin and keeps the code available until it expires. Previously linked chats are detected automatically so repeat
-codes do not create duplicates.
+requesting admin and keeps the code available until it expires. When an admin posts the code anonymously, the bot replies in
+the group explaining that confirmation is required and sends the issuer a DM with an inline Approve button plus the
+`/setupgroup confirm <code> <chatId>` command. Approving the prompt completes the link by reusing the original setup code.
+Previously linked chats are detected automatically so repeat codes do not create duplicates.
 
 ## Settings management
 

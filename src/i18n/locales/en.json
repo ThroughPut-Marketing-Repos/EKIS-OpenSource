@@ -280,6 +280,7 @@
       "exchangeSelected": "Great choice! {{ exchange }} requires an eligible affiliate account.",
       "minimumDeposit": "Minimum deposit: {{ amount }}",
       "sendUidInstruction": "Please reply with the UID you would like us to verify.",
+      "dmRequired": "Please message me directly to verify your UID.",
       "affiliateLinkLabel": "Affiliate link: {{ link }}",
       "exchangeNotAvailable": "That exchange is not available. Please select one of the listed options."
     },

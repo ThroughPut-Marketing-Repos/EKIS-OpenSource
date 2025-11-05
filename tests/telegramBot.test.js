@@ -475,7 +475,7 @@ describe('telegram verification invites', () => {
     createTelegramBot({ enabled: true, token: 'token' }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
 
     const startHandler = onTextMock.mock.calls.find(([pattern]) => pattern.toString() === '/\\/start/i')[1];
-    await startHandler({ chat: { id: chatId }, from: { id: telegramUserId } });
+    await startHandler({ chat: { id: chatId, type: 'private' }, from: { id: telegramUserId } });
 
     expect(loggerMock.info).toHaveBeenCalledWith(
       'Bypassing Telegram exchange selection: single exchange configured.',
@@ -493,9 +493,27 @@ describe('telegram verification invites', () => {
     expect(options).toBeUndefined();
 
     const messageHandler = onMock.mock.calls.find(([event]) => event === 'message')[1];
-    await messageHandler({ chat: { id: chatId }, from: { id: telegramUserId }, text: 'UID123' });
+    await messageHandler({ chat: { id: chatId, type: 'private' }, from: { id: telegramUserId }, text: 'UID123' });
 
     expect(volumeVerifier.verify).toHaveBeenCalledWith('UID123', { exchangeId: 'binance' });
+  });
+
+  it('prompts group chats to move verification to direct messages', async () => {
+    const exchanges = [{ id: 'binance', description: 'Binance' }];
+
+    const volumeVerifier = {
+      getExchanges: jest.fn().mockReturnValue(exchanges),
+      verify: jest.fn(),
+      getExchangeConfig: jest.fn().mockReturnValue(exchanges[0])
+    };
+
+    createTelegramBot({ enabled: true, token: 'token' }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
+
+    const startHandler = onTextMock.mock.calls.find(([pattern]) => pattern.toString() === '/\\/start/i')[1];
+    await startHandler({ chat: { id: chatId, type: 'group' }, from: { id: telegramUserId } });
+
+    expect(sendMessageMock).toHaveBeenCalledWith(chatId, translator.t('telegram.verification.dmRequired'));
+    expect(volumeVerifier.verify).not.toHaveBeenCalled();
   });
 
   it('renders a custom start message template with placeholders', async () => {
@@ -515,7 +533,7 @@ describe('telegram verification invites', () => {
     createTelegramBot({ enabled: true, token: 'token', startMessage: 'Custom intro {{ exchange }}\n{{ minimumDepositLine }}\n{{ affiliateLinkLine }}' }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
 
     const startHandler = onTextMock.mock.calls.find(([pattern]) => pattern.toString() === '/\\/start/i')[1];
-    await startHandler({ chat: { id: chatId }, from: { id: telegramUserId } });
+    await startHandler({ chat: { id: chatId, type: 'private' }, from: { id: telegramUserId } });
 
     const [targetChatId, messageText] = sendMessageMock.mock.calls[0];
     expect(targetChatId).toEqual(chatId);
@@ -548,7 +566,7 @@ describe('telegram verification invites', () => {
     createTelegramBot({ enabled: true, token: 'token' }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
 
     const messageHandler = onMock.mock.calls.find(([event]) => event === 'message')[1];
-    await messageHandler({ chat: { id: chatId }, from: { id: telegramUserId }, text: 'UID789' });
+    await messageHandler({ chat: { id: chatId, type: 'private' }, from: { id: telegramUserId }, text: 'UID789' });
 
     expect(volumeVerifier.verify).toHaveBeenCalledWith('UID789', { exchangeId: 'binance' });
   });
@@ -581,10 +599,31 @@ describe('telegram verification invites', () => {
     createTelegramBot({ enabled: true, token: 'token' }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
 
     const messageHandler = onMock.mock.calls.find(([event]) => event === 'message')[1];
-    await messageHandler({ chat: { id: chatId }, from: { id: telegramUserId }, text: 'UID456' });
+    await messageHandler({ chat: { id: chatId, type: 'private' }, from: { id: telegramUserId }, text: 'UID456' });
 
     expect(volumeVerifier.verify).toHaveBeenCalledWith('UID456', { exchangeId: 'blofin' });
     expect(loadRuntimeConfigMock).toHaveBeenCalled();
+  });
+
+  it('ignores verification messages sent from group chats', async () => {
+    const exchanges = [{ id: 'binance', description: 'Binance' }];
+
+    const volumeVerifier = {
+      getExchanges: jest.fn().mockReturnValue(exchanges),
+      verify: jest.fn(),
+      getExchangeConfig: jest.fn().mockReturnValue(exchanges[0])
+    };
+
+    createTelegramBot({ enabled: true, token: 'token' }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
+
+    const messageHandler = onMock.mock.calls.find(([event]) => event === 'message')[1];
+    await messageHandler({ chat: { id: chatId, type: 'group' }, from: { id: telegramUserId }, text: 'UID000' });
+
+    expect(volumeVerifier.verify).not.toHaveBeenCalled();
+    expect(loggerMock.debug).toHaveBeenCalledWith(
+      'Ignoring Telegram message outside a direct chat for verification handling.',
+      expect.objectContaining({ chatId, chatType: 'group' })
+    );
   });
 
   it('sends invite buttons when verification succeeds', async () => {
@@ -610,17 +649,17 @@ describe('telegram verification invites', () => {
     createTelegramBot({ enabled: true, token: 'token', groupIds: ['@myspace'] }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
 
     const startHandler = onTextMock.mock.calls.find(([pattern]) => pattern.toString() === '/\\/start/i')[1];
-    await startHandler({ chat: { id: chatId }, from: { id: telegramUserId } });
+    await startHandler({ chat: { id: chatId, type: 'private' }, from: { id: telegramUserId } });
 
     const callbackHandler = onMock.mock.calls.find(([event]) => event === 'callback_query')[1];
     await callbackHandler({
       id: 'cb1',
       data: 'exchange:binance',
-      message: { chat: { id: chatId }, from: { id: telegramUserId } }
+      message: { chat: { id: chatId, type: 'private' }, from: { id: telegramUserId } }
     });
 
     const messageHandler = onMock.mock.calls.find(([event]) => event === 'message')[1];
-    await messageHandler({ chat: { id: chatId }, from: { id: telegramUserId }, text: 'UID123' });
+    await messageHandler({ chat: { id: chatId, type: 'private' }, from: { id: telegramUserId }, text: 'UID123' });
 
     const finalCall = sendMessageMock.mock.calls[sendMessageMock.mock.calls.length - 1];
     expect(finalCall[0]).toEqual(chatId);

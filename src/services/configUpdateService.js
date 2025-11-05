@@ -668,6 +668,39 @@ export const setVolumeWarningDays = async (days) => {
   }
 };
 
+export const setTelegramStartMessage = async (message) => {
+  const normaliseMessage = (value) => {
+    if (value === null || typeof value === 'undefined') {
+      return null;
+    }
+
+    const text = String(value)
+      .replace(/\r\n/g, '\n')
+      .replace(/\r/g, '\n');
+
+    const trimmed = text.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  const startMessage = normaliseMessage(message);
+
+  try {
+    const configuration = await ensureConfigurationRecord();
+    await configuration.update({ telegram_start_message: startMessage });
+    if (startMessage) {
+      logger.info('Updated Telegram start message via settings command.', {
+        preview: startMessage.slice(0, 120)
+      });
+    } else {
+      logger.info('Cleared the Telegram start message via settings command.');
+    }
+    return refreshRuntimeConfig();
+  } catch (error) {
+    logger.error(`Failed to update Telegram start message: ${error.message}`);
+    throw error;
+  }
+};
+
 export const upsertExchangeCredentials = async (payload) => {
   const name = normaliseExchangeName(payload?.name);
   const type = payload?.type?.trim();
@@ -818,6 +851,7 @@ export default {
   setVolumeCheckDays,
   setVolumeWarningEnabled,
   setVolumeWarningDays,
+  setTelegramStartMessage,
   upsertExchangeCredentials,
   removeExchange,
   listExchanges,

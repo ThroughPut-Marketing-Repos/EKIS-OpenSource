@@ -33,6 +33,7 @@ export const defaultConfig = {
   telegram: {
     enabled: false,
     token: '',
+    startMessage: '',
     joinMessage: '',
     admins: [],
     groupId: '',
@@ -139,6 +140,7 @@ const applyEnvironmentOverrides = (config) => {
     },
     telegram: {
       token: process.env.TELEGRAM_BOT_TOKEN,
+      startMessage: process.env.TELEGRAM_START_MESSAGE,
       joinMessage: process.env.TELEGRAM_JOIN_MESSAGE,
       groupId: process.env.TELEGRAM_GROUP_ID,
       groupIds: parseGroupIds(process.env.TELEGRAM_GROUP_IDS)
@@ -280,6 +282,7 @@ const buildDatabaseOverrides = async () => {
       overrides.telegram = {
         enabled: Boolean(configuration.telegram_bot_token),
         token: configuration.telegram_bot_token || '',
+        startMessage: configuration.telegram_start_message || '',
         joinMessage: configuration.telegram_join_message || '',
         admins: parseAdmins(configuration.telegram_admins),
         groupId: configuration.telegram_group_id || '',

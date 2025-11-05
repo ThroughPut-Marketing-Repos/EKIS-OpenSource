@@ -253,6 +253,70 @@ const buildInviteKeyboard = (invites) => invites.map((invite, index, all) => [{
   url: invite.link
 }]);
 
+const START_MESSAGE_PLACEHOLDER_PATTERN = /\{\{\s*(\w+)\s*\}\}/g;
+
+const renderStartMessageTemplate = (template, context) => template.replace(
+  START_MESSAGE_PLACEHOLDER_PATTERN,
+  (match, key) => (Object.prototype.hasOwnProperty.call(context, key) ? context[key] ?? '' : match)
+);
+
+const hasCustomStartMessage = (telegramConfig) => {
+  if (!telegramConfig) {
+    return false;
+  }
+
+  const template = telegramConfig.startMessage;
+  return typeof template === 'string' && template.trim().length > 0;
+};
+
+const buildVerificationPrompt = ({ telegramConfig, translator, exchangeConfig }) => {
+  const translate = ensureTranslator(translator);
+  const exchangeLabel = exchangeConfig.description || exchangeConfig.name || exchangeConfig.id;
+  const depositThreshold = typeof exchangeConfig.depositThreshold === 'number'
+    && !Number.isNaN(exchangeConfig.depositThreshold)
+    ? exchangeConfig.depositThreshold
+    : null;
+  const affiliateLink = exchangeConfig.affiliateLink || null;
+
+  if (hasCustomStartMessage(telegramConfig)) {
+    const context = {
+      exchange: exchangeLabel,
+      deposit: depositThreshold !== null ? String(depositThreshold) : '',
+      minimumDepositLine: depositThreshold !== null
+        ? translate('telegram.verification.minimumDeposit', { amount: depositThreshold })
+        : '',
+      affiliateLink: affiliateLink || '',
+      affiliateLinkLine: affiliateLink
+        ? translate('telegram.verification.affiliateLinkLabel', { link: affiliateLink })
+        : ''
+    };
+
+    const rendered = renderStartMessageTemplate(telegramConfig.startMessage, context).trim();
+
+    if (affiliateLink && !rendered.includes(affiliateLink)) {
+      return [rendered, '', context.affiliateLinkLine].join('\n');
+    }
+
+    return rendered;
+  }
+
+  const messageLines = [
+    translate('telegram.verification.singleExchangeWelcome', { exchange: exchangeLabel }),
+    translate('telegram.verification.singleExchangeSummary', { exchange: exchangeLabel }),
+    translate('telegram.verification.sendUidInstruction')
+  ];
+
+  if (depositThreshold !== null) {
+    messageLines.splice(2, 0, translate('telegram.verification.minimumDeposit', { amount: depositThreshold }));
+  }
+
+  if (affiliateLink) {
+    messageLines.push('', translate('telegram.verification.affiliateLinkLabel', { link: affiliateLink }));
+  }
+
+  return messageLines.join('\n');
+};
+
 export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerifier, configUpdater, translator }) => async (msg, argsText) => {
   const translate = ensureTranslator(translator);
   const chatId = msg.chat.id;
@@ -321,6 +385,21 @@ export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerif
         await bot.sendMessage(chatId, translate('telegram.settings.warningDaysUpdated', {
           days: updatedConfig.verification.volumeWarningDays
         }));
+        break;
+      }
+      case 'start_message': {
+        const rawMessage = (argsText || '').replace(/^\s*start_message\s*/i, '');
+        if (!rawMessage) {
+          throw new Error(translate('telegram.settings.startMessageUsage'));
+        }
+
+        const shouldClear = ['clear', 'none', 'default', 'reset'].includes(rawMessage.trim().toLowerCase());
+        const messageValue = shouldClear ? null : rawMessage.replace(/\\n/g, '\n');
+        updatedConfig = await configUpdater.setTelegramStartMessage(messageValue);
+        telegramConfig.startMessage = updatedConfig.telegram?.startMessage || '';
+        await bot.sendMessage(chatId, messageValue
+          ? translate('telegram.settings.startMessageUpdated')
+          : translate('telegram.settings.startMessageCleared'));
         break;
       }
       case 'api': {
@@ -636,6 +715,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
 
   const translator = dependencies.translator;
   const translate = ensureTranslator(translator);
+  const loadConfig = dependencies.loadConfig || loadRuntimeConfig;
 
   const bot = new TelegramBot(telegramConfig.token, { polling: true });
   // Recover gracefully from transient polling failures such as ECONNRESET by restarting the
@@ -778,25 +858,13 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
         chatId,
         exchangeId
       });
+      const promptMessage = buildVerificationPrompt({
+        telegramConfig,
+        translator,
+        exchangeConfig: singleExchange
+      });
 
-      const messageLines = [
-        translate('telegram.verification.singleExchangeWelcome', { exchange: exchangeLabel }),
-        translate('telegram.verification.singleExchangeSummary', { exchange: exchangeLabel }),
-
-        translate('telegram.verification.sendUidInstruction')
-      ];
-
-      if (typeof singleExchange.depositThreshold === 'number' && !Number.isNaN(singleExchange.depositThreshold)) {
-        messageLines.splice(2, 0, translate('telegram.verification.minimumDeposit', {
-          amount: singleExchange.depositThreshold
-        }));
-      }
-
-      if (affiliateLink) {
-        messageLines.push('', translate('telegram.verification.affiliateLinkLabel', { link: affiliateLink }));
-      }
-
-      await bot.sendMessage(chatId, messageLines.join('\n'));
+      await bot.sendMessage(chatId, promptMessage);
       return;
     }
 
@@ -1466,17 +1534,16 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     });
 
     const followUpLines = [
-      translate('telegram.verification.exchangeSelected', { exchange: exchangeLabel }),
-      translate('telegram.verification.sendUidInstruction')
+      translate('telegram.verification.exchangeSelected', { exchange: exchangeLabel })
     ];
 
-    if (typeof selectedExchange.depositThreshold === 'number' && !Number.isNaN(selectedExchange.depositThreshold)) {
-      followUpLines.splice(1, 0, translate('telegram.verification.minimumDeposit', { amount: selectedExchange.depositThreshold }));
-    }
+    const promptMessage = buildVerificationPrompt({
+      telegramConfig,
+      translator,
+      exchangeConfig: selectedExchange
+    });
 
-    if (selectedExchange.affiliateLink) {
-      followUpLines.push('', translate('telegram.verification.affiliateLinkLabel', { link: selectedExchange.affiliateLink }));
-    }
+    followUpLines.push('', promptMessage);
     await bot.sendMessage(chatId, followUpLines.join('\n'));
   });
 
@@ -1497,11 +1564,46 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     }
 
     const chatId = msg.chat.id;
-    const session = sessions.get(chatId);
+    let session = sessions.get(chatId);
 
     if (msg.text.startsWith('/start')) {
       // The /start handler already processed this message.
       return;
+    }
+
+    if (!session || session.step !== STEPS.AWAITING_UID) {
+      const exchanges = volumeVerifier.getExchanges ? volumeVerifier.getExchanges() : [];
+      let selectedExchange = null;
+
+      if (exchanges.length === 1) {
+        [selectedExchange] = exchanges;
+      } else if (exchanges.length > 1) {
+        try {
+          const runtimeConfig = await loadConfig();
+          const defaultExchangeId = runtimeConfig?.verification?.defaultExchange || null;
+          if (defaultExchangeId) {
+            selectedExchange = exchanges.find((exchange) => exchange.id === defaultExchangeId) || null;
+          }
+        } catch (configError) {
+          logger.warn(`Unable to resolve default exchange while processing direct UID message: ${configError.message}`);
+        }
+      }
+
+      if (selectedExchange) {
+        const exchangeLabel = selectedExchange.description || selectedExchange.name || selectedExchange.id;
+        sessions.set(chatId, {
+          step: STEPS.AWAITING_UID,
+          exchangeId: selectedExchange.id,
+          exchangeName: exchangeLabel,
+          affiliateLink: selectedExchange.affiliateLink || null
+        });
+        session = sessions.get(chatId);
+        logger.info('Received UID before /start; defaulting to configured exchange.', {
+          telegramUserId: msg.from?.id,
+          chatId,
+          exchangeId: selectedExchange.id
+        });
+      }
     }
 
     if (!session || session.step !== STEPS.AWAITING_UID) {

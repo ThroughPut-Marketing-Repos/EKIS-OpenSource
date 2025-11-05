@@ -19,6 +19,10 @@ const saveVerifiedUserMock = jest.fn();
 
 class VerifiedUserConflictErrorMock extends Error {}
 
+const loadRuntimeConfigMock = jest.fn().mockResolvedValue({
+  verification: { defaultExchange: 'binance' }
+});
+
 jest.unstable_mockModule('../src/utils/logger.js', () => ({
   default: loggerMock,
   logger: loggerMock
@@ -207,6 +211,55 @@ describe('telegram settings command', () => {
     expect(refresh).toHaveBeenCalled();
     expect(bot.sendMessage).toHaveBeenCalledWith(1, 'Warning lead time updated to 4 days.');
   });
+
+  it('allows admins to update the start message', async () => {
+    const bot = { sendMessage: jest.fn() };
+    const refresh = jest.fn();
+    const setTelegramStartMessage = jest.fn().mockResolvedValue({
+      telegram: { startMessage: 'Welcome on {{ exchange }}' },
+      verification: { minimumVolume: 1000 }
+    });
+    const handler = createTelegramSettingsHandler({
+      bot,
+      telegramConfig,
+      volumeVerifier: { refresh },
+      configUpdater: {
+        setTelegramStartMessage
+      },
+      translator
+    });
+
+    await handler(createMessage({ from: { id: '100' } }), 'start_message Welcome on {{ exchange }}');
+    expect(setTelegramStartMessage).toHaveBeenCalledWith('Welcome on {{ exchange }}');
+    expect(telegramConfig.startMessage).toEqual('Welcome on {{ exchange }}');
+    expect(refresh).toHaveBeenCalled();
+    expect(bot.sendMessage).toHaveBeenCalledWith(1, 'Start message updated. Future verifications will use the new message after /start.');
+  });
+
+  it('allows admins to clear the start message', async () => {
+    telegramConfig.startMessage = 'Custom message';
+    const bot = { sendMessage: jest.fn() };
+    const refresh = jest.fn();
+    const setTelegramStartMessage = jest.fn().mockResolvedValue({
+      telegram: { startMessage: '' },
+      verification: { minimumVolume: 1000 }
+    });
+    const handler = createTelegramSettingsHandler({
+      bot,
+      telegramConfig,
+      volumeVerifier: { refresh },
+      configUpdater: {
+        setTelegramStartMessage
+      },
+      translator
+    });
+
+    await handler(createMessage({ from: { id: '100' } }), 'start_message clear');
+    expect(setTelegramStartMessage).toHaveBeenCalledWith(null);
+    expect(telegramConfig.startMessage).toEqual('');
+    expect(refresh).toHaveBeenCalled();
+    expect(bot.sendMessage).toHaveBeenCalledWith(1, 'Start message cleared. The default message will be used after /start.');
+  });
 });
 
 describe('telegram owner command', () => {
@@ -323,7 +376,7 @@ describe('telegram polling recovery', () => {
       handlers[event] = handler;
     });
 
-    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() }, { translator });
+    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() }, { translator, loadConfig: loadRuntimeConfigMock });
 
     const pollingErrorHandler = handlers.polling_error;
     expect(pollingErrorHandler).toBeDefined();
@@ -348,7 +401,7 @@ describe('telegram polling recovery', () => {
       handlers[event] = handler;
     });
 
-    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() }, { translator });
+    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() }, { translator, loadConfig: loadRuntimeConfigMock });
 
     const pollingErrorHandler = handlers.polling_error;
     pollingErrorHandler({ code: 'EFATAL', message: 'Something else' });
@@ -367,7 +420,7 @@ describe('telegram polling recovery', () => {
       handlers[event] = handler;
     });
 
-    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() }, { translator });
+    createTelegramBot({ enabled: true, token: 'token' }, { getExchanges: () => [], verify: jest.fn() }, { translator, loadConfig: loadRuntimeConfigMock });
 
     const pollingErrorHandler = handlers.polling_error;
     pollingErrorHandler({ code: 'EFATAL', message: 'EFATAL: Error: read ECONNRESET' });
@@ -386,6 +439,8 @@ describe('telegram verification invites', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
+    loadRuntimeConfigMock.mockClear();
+    loadRuntimeConfigMock.mockResolvedValue({ verification: { defaultExchange: 'binance' } });
     sendMessageMock.mockResolvedValue();
     answerCallbackQueryMock.mockResolvedValue();
     createChatInviteLinkMock.mockResolvedValue({ invite_link: 'https://t.me/+invite123' });
@@ -417,7 +472,7 @@ describe('telegram verification invites', () => {
       getExchangeConfig: jest.fn().mockReturnValue(exchanges[0])
     };
 
-    createTelegramBot({ enabled: true, token: 'token' }, volumeVerifier, { translator });
+    createTelegramBot({ enabled: true, token: 'token' }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
 
     const startHandler = onTextMock.mock.calls.find(([pattern]) => pattern.toString() === '/\\/start/i')[1];
     await startHandler({ chat: { id: chatId }, from: { id: telegramUserId } });
@@ -443,6 +498,95 @@ describe('telegram verification invites', () => {
     expect(volumeVerifier.verify).toHaveBeenCalledWith('UID123', { exchangeId: 'binance' });
   });
 
+  it('renders a custom start message template with placeholders', async () => {
+    const exchanges = [{
+      id: 'binance',
+      description: 'Binance',
+      depositThreshold: 150,
+      affiliateLink: 'https://example.com/affiliate'
+    }];
+
+    const volumeVerifier = {
+      getExchanges: jest.fn().mockReturnValue(exchanges),
+      verify: jest.fn().mockResolvedValue({ passed: false, exchangeId: 'binance', uid: 'UID000', deposit: { met: false } }),
+      getExchangeConfig: jest.fn().mockReturnValue(exchanges[0])
+    };
+
+    createTelegramBot({ enabled: true, token: 'token', startMessage: 'Custom intro {{ exchange }}\n{{ minimumDepositLine }}\n{{ affiliateLinkLine }}' }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
+
+    const startHandler = onTextMock.mock.calls.find(([pattern]) => pattern.toString() === '/\\/start/i')[1];
+    await startHandler({ chat: { id: chatId }, from: { id: telegramUserId } });
+
+    const [targetChatId, messageText] = sendMessageMock.mock.calls[0];
+    expect(targetChatId).toEqual(chatId);
+    expect(messageText).toContain('Custom intro Binance');
+    expect(messageText).toContain('Minimum deposit: 150');
+    const affiliateLabelMatches = messageText.match(/Affiliate link:/g) || [];
+    expect(affiliateLabelMatches).toHaveLength(1);
+  });
+
+  it('verifies a UID sent before /start when only one exchange is configured', async () => {
+    const exchanges = [{ id: 'binance', description: 'Binance' }];
+    const verifyResult = {
+      passed: false,
+      exchangeId: 'binance',
+      exchangeName: 'Binance',
+      uid: 'UID789',
+      volume: null,
+      volumeMet: null,
+      minimumVolume: 1000,
+      deposit: { met: false, threshold: null, reason: 'deposit_not_met' },
+      timestamp: '2024-01-01T00:00:00.000Z'
+    };
+
+    const volumeVerifier = {
+      getExchanges: jest.fn().mockReturnValue(exchanges),
+      verify: jest.fn().mockResolvedValue(verifyResult),
+      getExchangeConfig: jest.fn().mockReturnValue(exchanges[0])
+    };
+
+    createTelegramBot({ enabled: true, token: 'token' }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
+
+    const messageHandler = onMock.mock.calls.find(([event]) => event === 'message')[1];
+    await messageHandler({ chat: { id: chatId }, from: { id: telegramUserId }, text: 'UID789' });
+
+    expect(volumeVerifier.verify).toHaveBeenCalledWith('UID789', { exchangeId: 'binance' });
+  });
+
+  it('falls back to the configured default exchange when multiple exchanges exist', async () => {
+    const exchanges = [
+      { id: 'binance', description: 'Binance' },
+      { id: 'blofin', description: 'BloFin', affiliateLink: 'https://example.com/affiliate' }
+    ];
+    const verifyResult = {
+      passed: false,
+      exchangeId: 'blofin',
+      exchangeName: 'BloFin',
+      uid: 'UID456',
+      volume: null,
+      volumeMet: null,
+      minimumVolume: 1000,
+      deposit: { met: false, threshold: null, reason: 'deposit_not_met' },
+      timestamp: '2024-01-01T00:00:00.000Z'
+    };
+
+    loadRuntimeConfigMock.mockResolvedValueOnce({ verification: { defaultExchange: 'blofin' } });
+
+    const volumeVerifier = {
+      getExchanges: jest.fn().mockReturnValue(exchanges),
+      verify: jest.fn().mockResolvedValue(verifyResult),
+      getExchangeConfig: jest.fn().mockImplementation((exchangeId) => exchanges.find((exchange) => exchange.id === exchangeId))
+    };
+
+    createTelegramBot({ enabled: true, token: 'token' }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
+
+    const messageHandler = onMock.mock.calls.find(([event]) => event === 'message')[1];
+    await messageHandler({ chat: { id: chatId }, from: { id: telegramUserId }, text: 'UID456' });
+
+    expect(volumeVerifier.verify).toHaveBeenCalledWith('UID456', { exchangeId: 'blofin' });
+    expect(loadRuntimeConfigMock).toHaveBeenCalled();
+  });
+
   it('sends invite buttons when verification succeeds', async () => {
     const exchanges = [{ id: 'binance', description: 'Binance' }];
     const verifyResult = {
@@ -463,7 +607,7 @@ describe('telegram verification invites', () => {
       getExchangeConfig: jest.fn().mockReturnValue({ description: 'Binance' })
     };
 
-    createTelegramBot({ enabled: true, token: 'token', groupIds: ['@myspace'] }, volumeVerifier, { translator });
+    createTelegramBot({ enabled: true, token: 'token', groupIds: ['@myspace'] }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
 
     const startHandler = onTextMock.mock.calls.find(([pattern]) => pattern.toString() === '/\\/start/i')[1];
     await startHandler({ chat: { id: chatId }, from: { id: telegramUserId } });

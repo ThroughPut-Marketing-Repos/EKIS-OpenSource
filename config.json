@@ -14,6 +14,7 @@
   "telegram": {
     "enabled": false,
     "token": "YOUR_TELEGRAM_BOT_TOKEN",
+    "startMessage": "Welcome! We'll verify your UID on {{ exchange }}.\nMinimum deposit: {{ deposit }}\nPlease reply with the UID you would like us to verify.",
     "joinMessage": "Welcome to the community! Please review the pinned rules after joining.",
     "groupIds": [
       "@your_telegram_group"

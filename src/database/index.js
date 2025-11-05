@@ -98,6 +98,7 @@ const defineModels = (sequelize) => {
 
   Models.Configuration = sequelize.define('Configuration', {
     telegram_bot_token: DataTypes.STRING,
+    telegram_start_message: DataTypes.TEXT,
     telegram_join_message: DataTypes.TEXT,
     telegram_admins: DataTypes.TEXT,
     discord_bot_token: DataTypes.STRING,

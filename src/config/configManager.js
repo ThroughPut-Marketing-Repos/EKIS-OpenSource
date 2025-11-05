@@ -56,9 +56,7 @@ export const defaultConfig = {
     exchanges: {
       blofin: {
         type: 'blofin',
-        volumes: {
-          'demo-user': 2500
-        }
+        description: 'Blofin exchange integration. Provide API credentials via the database or environment overrides.'
       }
     }
   }

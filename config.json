@@ -26,17 +26,6 @@
     "authToken": "change-me"
   },
   "verification": {
-    "minimumVolume": 1000,
-    "defaultExchange": "mock",
-    "exchanges": {
-      "mock": {
-        "type": "mock",
-        "description": "Static mock volumes used for development and testing.",
-        "volumes": {
-          "demo-user": 2500,
-          "new-user": 500
-        }
-      }
-    }
+    "minimumVolume": 1000
   }
 }

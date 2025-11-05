@@ -236,6 +236,59 @@ describe('telegram settings command', () => {
     expect(bot.sendMessage).toHaveBeenCalledWith(1, 'Start message updated. Future verifications will use the new message after /start.');
   });
 
+  it('preserves newlines and formatting when updating the start message', async () => {
+    const bot = { sendMessage: jest.fn() };
+    const refresh = jest.fn();
+    const formattedMessage = 'Welcome to the community!\n\n• Step one\n• Step two';
+    const setTelegramStartMessage = jest.fn().mockResolvedValue({
+      telegram: { startMessage: formattedMessage },
+      verification: { minimumVolume: 1000 }
+    });
+    const handler = createTelegramSettingsHandler({
+      bot,
+      telegramConfig,
+      volumeVerifier: { refresh },
+      configUpdater: {
+        setTelegramStartMessage
+      },
+      translator
+    });
+
+    await handler(
+      createMessage({ from: { id: '100' } }),
+      `start_message ${formattedMessage.replace(/\n/g, '\\n')}`
+    );
+
+    expect(setTelegramStartMessage).toHaveBeenCalledWith('Welcome to the community!\n\n• Step one\n• Step two');
+    expect(bot.sendMessage).toHaveBeenCalledWith(1, 'Start message updated. Future verifications will use the new message after /start.');
+  });
+
+  it('accepts multiline start messages provided via actual line breaks', async () => {
+    const bot = { sendMessage: jest.fn() };
+    const refresh = jest.fn();
+    const messageWithBreaks = 'Line one\nLine two\n\nLine four';
+    const setTelegramStartMessage = jest.fn().mockResolvedValue({
+      telegram: { startMessage: messageWithBreaks },
+      verification: { minimumVolume: 1000 }
+    });
+    const handler = createTelegramSettingsHandler({
+      bot,
+      telegramConfig,
+      volumeVerifier: { refresh },
+      configUpdater: {
+        setTelegramStartMessage
+      },
+      translator
+    });
+
+    await handler(
+      createMessage({ from: { id: '100' } }),
+      'start_message Line one\nLine two\n\nLine four'
+    );
+
+    expect(setTelegramStartMessage).toHaveBeenCalledWith('Line one\nLine two\n\nLine four');
+  });
+
   it('allows admins to clear the start message', async () => {
     telegramConfig.startMessage = 'Custom message';
     const bot = { sendMessage: jest.fn() };
@@ -642,7 +695,7 @@ describe('telegram setupgroup anonymous confirmation', () => {
   let textHandlers;
 
   const getSetupHandler = () => {
-    const entry = textHandlers.find(({ pattern }) => pattern.toString() === '/\\/setupgroup(?:@[\\w_]+)?(?:\\s+(.*))?/');
+    const entry = textHandlers.find(({ pattern }) => pattern.toString() === '/\\/setupgroup(?:@[\\w_]+)?(?:\\s+([\\s\\S]*))?/');
     return entry?.handler;
   };
 

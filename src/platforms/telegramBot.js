@@ -864,7 +864,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
         exchangeConfig: singleExchange
       });
 
-      await bot.sendMessage(chatId, promptMessage);
+      await bot.sendMessage(chatId, promptMessage, { parse_mode: 'Markdown' });
       return;
     }
 
@@ -1572,7 +1572,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     });
 
     followUpLines.push('', promptMessage);
-    await bot.sendMessage(chatId, followUpLines.join('\n'));
+    await bot.sendMessage(chatId, followUpLines.join('\n'), { parse_mode: 'Markdown' });
   });
 
   bot.on('message', async (msg) => {

@@ -216,7 +216,7 @@ describe('telegram settings command', () => {
     const bot = { sendMessage: jest.fn() };
     const refresh = jest.fn();
     const setTelegramStartMessage = jest.fn().mockResolvedValue({
-      telegram: { startMessage: 'Welcome on {{ exchange }}' },
+      telegram: { startMessage: ['Welcome on {{ exchange }}'] },
       verification: { minimumVolume: 1000 }
     });
     const handler = createTelegramSettingsHandler({
@@ -230,8 +230,8 @@ describe('telegram settings command', () => {
     });
 
     await handler(createMessage({ from: { id: '100' } }), 'start_message Welcome on {{ exchange }}');
-    expect(setTelegramStartMessage).toHaveBeenCalledWith('Welcome on {{ exchange }}');
-    expect(telegramConfig.startMessage).toEqual('Welcome on {{ exchange }}');
+    expect(setTelegramStartMessage).toHaveBeenCalledWith(['Welcome on {{ exchange }}']);
+    expect(telegramConfig.startMessage).toEqual(['Welcome on {{ exchange }}']);
     expect(refresh).toHaveBeenCalled();
     expect(bot.sendMessage).toHaveBeenCalledWith(1, 'Start message updated. Future verifications will use the new message after /start.');
   });
@@ -241,7 +241,7 @@ describe('telegram settings command', () => {
     const refresh = jest.fn();
     const formattedMessage = 'Welcome to the community!\n\n• Step one\n• Step two';
     const setTelegramStartMessage = jest.fn().mockResolvedValue({
-      telegram: { startMessage: formattedMessage },
+      telegram: { startMessage: [formattedMessage] },
       verification: { minimumVolume: 1000 }
     });
     const handler = createTelegramSettingsHandler({
@@ -259,7 +259,7 @@ describe('telegram settings command', () => {
       `start_message ${formattedMessage.replace(/\n/g, '\\n')}`
     );
 
-    expect(setTelegramStartMessage).toHaveBeenCalledWith('Welcome to the community!\n\n• Step one\n• Step two');
+    expect(setTelegramStartMessage).toHaveBeenCalledWith(['Welcome to the community!\n\n• Step one\n• Step two']);
     expect(bot.sendMessage).toHaveBeenCalledWith(1, 'Start message updated. Future verifications will use the new message after /start.');
   });
 
@@ -268,7 +268,7 @@ describe('telegram settings command', () => {
     const refresh = jest.fn();
     const messageWithBreaks = 'Line one\nLine two\n\nLine four';
     const setTelegramStartMessage = jest.fn().mockResolvedValue({
-      telegram: { startMessage: messageWithBreaks },
+      telegram: { startMessage: [messageWithBreaks] },
       verification: { minimumVolume: 1000 }
     });
     const handler = createTelegramSettingsHandler({
@@ -286,15 +286,41 @@ describe('telegram settings command', () => {
       'start_message Line one\nLine two\n\nLine four'
     );
 
-    expect(setTelegramStartMessage).toHaveBeenCalledWith('Line one\nLine two\n\nLine four');
+    expect(setTelegramStartMessage).toHaveBeenCalledWith(['Line one\nLine two\n\nLine four']);
   });
 
-  it('allows admins to clear the start message', async () => {
-    telegramConfig.startMessage = 'Custom message';
+  it('splits multi-message input on the documented delimiter', async () => {
     const bot = { sendMessage: jest.fn() };
     const refresh = jest.fn();
     const setTelegramStartMessage = jest.fn().mockResolvedValue({
-      telegram: { startMessage: '' },
+      telegram: { startMessage: ['First message', 'Second message'] },
+      verification: { minimumVolume: 1000 }
+    });
+    const handler = createTelegramSettingsHandler({
+      bot,
+      telegramConfig,
+      volumeVerifier: { refresh },
+      configUpdater: {
+        setTelegramStartMessage
+      },
+      translator
+    });
+
+    await handler(
+      createMessage({ from: { id: '100' } }),
+      'start_message First message\n---\nSecond message'
+    );
+
+    expect(setTelegramStartMessage).toHaveBeenCalledWith(['First message', 'Second message']);
+    expect(bot.sendMessage).toHaveBeenCalledWith(1, 'Start message updated. Future verifications will use the new message after /start.');
+  });
+
+  it('allows admins to clear the start message', async () => {
+    telegramConfig.startMessage = ['Custom message'];
+    const bot = { sendMessage: jest.fn() };
+    const refresh = jest.fn();
+    const setTelegramStartMessage = jest.fn().mockResolvedValue({
+      telegram: { startMessage: [] },
       verification: { minimumVolume: 1000 }
     });
     const handler = createTelegramSettingsHandler({
@@ -308,8 +334,8 @@ describe('telegram settings command', () => {
     });
 
     await handler(createMessage({ from: { id: '100' } }), 'start_message clear');
-    expect(setTelegramStartMessage).toHaveBeenCalledWith(null);
-    expect(telegramConfig.startMessage).toEqual('');
+    expect(setTelegramStartMessage).toHaveBeenCalledWith([]);
+    expect(telegramConfig.startMessage).toEqual([]);
     expect(refresh).toHaveBeenCalled();
     expect(bot.sendMessage).toHaveBeenCalledWith(1, 'Start message cleared. The default message will be used after /start.');
   });
@@ -543,7 +569,7 @@ describe('telegram verification invites', () => {
     expect(messageText).toContain('Minimum deposit: 250');
     expect(messageText).toContain('Please reply with the UID you would like us to verify.');
     expect(messageText).toContain('https://example.com/affiliate');
-    expect(options).toBeUndefined();
+    expect(options).toEqual({ parse_mode: 'Markdown' });
 
     const messageHandler = onMock.mock.calls.find(([event]) => event === 'message')[1];
     await messageHandler({ chat: { id: chatId, type: 'private' }, from: { id: telegramUserId }, text: 'UID123' });
@@ -594,6 +620,37 @@ describe('telegram verification invites', () => {
     expect(messageText).toContain('Minimum deposit: 150');
     const affiliateLabelMatches = messageText.match(/Affiliate link:/g) || [];
     expect(affiliateLabelMatches).toHaveLength(1);
+  });
+
+  it('sends each configured start message separately and appends affiliate prompts when missing', async () => {
+    const exchanges = [{
+      id: 'binance',
+      description: 'Binance',
+      depositThreshold: 100,
+      affiliateLink: 'https://example.com/affiliate'
+    }];
+
+    const volumeVerifier = {
+      getExchanges: jest.fn().mockReturnValue(exchanges),
+      verify: jest.fn(),
+      getExchangeConfig: jest.fn().mockReturnValue(exchanges[0])
+    };
+
+    createTelegramBot({
+      enabled: true,
+      token: 'token',
+      startMessage: ['Intro message', 'Second step reminder']
+    }, volumeVerifier, { translator, loadConfig: loadRuntimeConfigMock });
+
+    const startHandler = onTextMock.mock.calls.find(([pattern]) => pattern.toString() === '/\\/start/i')[1];
+    await startHandler({ chat: { id: chatId, type: 'private' }, from: { id: telegramUserId } });
+
+    expect(sendMessageMock).toHaveBeenCalledTimes(3);
+    const messages = sendMessageMock.mock.calls.map(([, text, options]) => ({ text, options }));
+    expect(messages[0].text).toBe('Intro message');
+    expect(messages[0].options).toEqual({ parse_mode: 'Markdown' });
+    expect(messages[1].text).toBe('Second step reminder');
+    expect(messages[2].text).toContain('Affiliate link:');
   });
 
   it('verifies a UID sent before /start when only one exchange is configured', async () => {

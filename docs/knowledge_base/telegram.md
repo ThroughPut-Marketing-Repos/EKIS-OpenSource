@@ -87,6 +87,21 @@ The command accepts free-form text and supports the placeholders shown below. Es
 when the message is saved, and literal line breaks typed into the command are preserved so bullet lists and spacing remain
 intact. Send `clear`, `none`, `default`, or `reset` to restore the built-in copy.
 
+Multiple greeting messages can be scheduled by either placing `---` on its own line between segments or by providing a JSON array of strings. Each entry is sent as an individual Telegram message, allowing longer onboarding flows without overwhelming a single message bubble. For example:
+
+```text
+/settings start_message Welcome to the verification bot!\nPlease have your UID ready.\n---\nNeed help? Reply with /help and we'll guide you through the steps.
+```
+
+When the bot processes this configuration it delivers two separate replies. The JSON array form is useful when calling the HTTP configuration API directly:
+
+```json
+[
+  "Welcome to the verification bot!",
+  "Need help? Reply with /help and we'll guide you through the steps."
+]
+```
+
 | Placeholder | Description |
 |-------------|-------------|
 | `{{ exchange }}` | Replaced with the selected exchange label. |
@@ -96,7 +111,8 @@ intact. Send `clear`, `none`, `default`, or `reset` to restore the built-in copy
 | `{{ affiliateLinkLine }}` | Replaced with the translated affiliate link sentence, when an URL exists. |
 
 When the saved message does not reference `{{ affiliateLink }}` or `{{ affiliateLinkLine }}` the bot appends the translated
-affiliate link prompt automatically so users still receive the link during verification.
+affiliate link prompt automatically so users still receive the link during verification. The appended copy is delivered as a
+separate message so it stands out in longer sequences.
 
 ## Trading statistics
 

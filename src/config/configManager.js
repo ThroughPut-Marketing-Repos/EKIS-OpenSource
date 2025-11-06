@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import logger from '../utils/logger.js';
+import { normaliseStartMessages } from '../utils/startMessage.js';
 import { getModels } from '../database/index.js';
 
 export const defaultConfig = {
@@ -33,7 +34,7 @@ export const defaultConfig = {
   telegram: {
     enabled: false,
     token: '',
-    startMessage: '',
+    startMessage: [],
     joinMessage: '',
     admins: [],
     groupId: '',
@@ -113,6 +114,21 @@ const parseGroupIds = (rawGroupIds) => {
     .split(',')
     .map((value) => value.trim())
     .filter(Boolean);
+};
+
+const applyTelegramNormalisation = (config) => {
+  if (!config?.telegram) {
+    return config;
+  }
+
+  const startMessages = normaliseStartMessages(config.telegram.startMessage);
+  return {
+    ...config,
+    telegram: {
+      ...config.telegram,
+      startMessage: startMessages
+    }
+  };
 };
 
 const applyEnvironmentOverrides = (config) => {
@@ -412,8 +428,9 @@ export const loadConfig = async (configPath = CONFIG_PATH) => {
   const databaseOverrides = await buildDatabaseOverrides();
   const configWithDb = deepMerge(mergedConfig, databaseOverrides);
   const configWithEnv = applyEnvironmentOverrides(configWithDb);
-  validateConfig(configWithEnv);
-  return configWithEnv;
+  const normalisedConfig = applyTelegramNormalisation(configWithEnv);
+  validateConfig(normalisedConfig);
+  return normalisedConfig;
 };
 
 export const getConfig = async () => {

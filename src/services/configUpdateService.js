@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import logger from '../utils/logger.js';
+import { normaliseStartMessages, serialiseStartMessages } from '../utils/startMessage.js';
 import { getModels } from '../database/index.js';
 import { resetConfigCache, getConfig } from '../config/configManager.js';
 
@@ -669,27 +670,16 @@ export const setVolumeWarningDays = async (days) => {
 };
 
 export const setTelegramStartMessage = async (message) => {
-  const normaliseMessage = (value) => {
-    if (value === null || typeof value === 'undefined') {
-      return null;
-    }
-
-    const text = String(value)
-      .replace(/\r\n/g, '\n')
-      .replace(/\r/g, '\n');
-
-    const trimmed = text.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  };
-
-  const startMessage = normaliseMessage(message);
+  const startMessages = normaliseStartMessages(message);
+  const storedValue = serialiseStartMessages(startMessages);
 
   try {
     const configuration = await ensureConfigurationRecord();
-    await configuration.update({ telegram_start_message: startMessage });
-    if (startMessage) {
-      logger.info('Updated Telegram start message via settings command.', {
-        preview: startMessage.slice(0, 120)
+    await configuration.update({ telegram_start_message: storedValue });
+    if (startMessages.length) {
+      logger.info('Updated Telegram start messages via settings command.', {
+        messageCount: startMessages.length,
+        preview: startMessages[0].slice(0, 120)
       });
     } else {
       logger.info('Cleared the Telegram start message via settings command.');

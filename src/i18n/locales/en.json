@@ -311,7 +311,7 @@
       "volumeWarningEnabled": "Volume warning notifications have been enabled.",
       "volumeWarningDisabled": "Volume warning notifications have been disabled.",
       "warningDaysUpdated": "Warning lead time updated to {{ days }} days.",
-      "startMessageUsage": "Usage: /settings start_message <text|clear>",
+      "startMessageUsage": "Usage: /settings start_message <text|clear> – separate multiple messages with a line containing \"{{ delimiter }}\" or pass a JSON array.",
       "startMessageUpdated": "Start message updated. Future verifications will use the new message after /start.",
       "startMessageCleared": "Start message cleared. The default message will be used after /start.",
       "api": {

@@ -5,6 +5,7 @@ import configUpdateService from '../services/configUpdateService.js';
 import { getConfig as loadRuntimeConfig } from '../config/configManager.js';
 import { saveVerifiedUser, VerifiedUserConflictError } from '../services/verificationService.js';
 import statisticsService from '../services/statisticsService.js';
+import { normaliseStartMessages, START_MESSAGE_DELIMITER } from '../utils/startMessage.js';
 
 const STEPS = {
   AWAITING_EXCHANGE: 'awaiting_exchange',
@@ -265,8 +266,11 @@ const hasCustomStartMessage = (telegramConfig) => {
     return false;
   }
 
-  const template = telegramConfig.startMessage;
-  return typeof template === 'string' && template.trim().length > 0;
+  if (Array.isArray(telegramConfig.startMessage)) {
+    return telegramConfig.startMessage.length > 0;
+  }
+
+  return typeof telegramConfig.startMessage === 'string' && telegramConfig.startMessage.trim().length > 0;
 };
 
 const buildVerificationPrompt = ({ telegramConfig, translator, exchangeConfig }) => {
@@ -277,6 +281,24 @@ const buildVerificationPrompt = ({ telegramConfig, translator, exchangeConfig })
     ? exchangeConfig.depositThreshold
     : null;
   const affiliateLink = exchangeConfig.affiliateLink || null;
+
+  const buildDefaultPrompt = () => {
+    const messageLines = [
+      translate('telegram.verification.singleExchangeWelcome', { exchange: exchangeLabel }),
+      translate('telegram.verification.singleExchangeSummary', { exchange: exchangeLabel }),
+      translate('telegram.verification.sendUidInstruction')
+    ];
+
+    if (depositThreshold !== null) {
+      messageLines.splice(2, 0, translate('telegram.verification.minimumDeposit', { amount: depositThreshold }));
+    }
+
+    if (affiliateLink) {
+      messageLines.push('', translate('telegram.verification.affiliateLinkLabel', { link: affiliateLink }));
+    }
+
+    return [messageLines.join('\n')];
+  };
 
   if (hasCustomStartMessage(telegramConfig)) {
     const context = {
@@ -291,30 +313,44 @@ const buildVerificationPrompt = ({ telegramConfig, translator, exchangeConfig })
         : ''
     };
 
-    const rendered = renderStartMessageTemplate(telegramConfig.startMessage, context).trim();
+    const templates = Array.isArray(telegramConfig.startMessage)
+      ? telegramConfig.startMessage
+      : [telegramConfig.startMessage];
+    const renderedMessages = templates
+      .map((template) => renderStartMessageTemplate(template, context).trim())
+      .filter((message) => message.length > 0);
 
-    if (affiliateLink && !rendered.includes(affiliateLink)) {
-      return [rendered, '', context.affiliateLinkLine].join('\n');
+    if (affiliateLink) {
+      const includesAffiliateLink = renderedMessages.some((message) => message.includes(affiliateLink));
+      if (!includesAffiliateLink && context.affiliateLinkLine) {
+        renderedMessages.push(context.affiliateLinkLine);
+      }
     }
 
-    return rendered;
+    if (renderedMessages.length > 0) {
+      return renderedMessages;
+    }
   }
 
-  const messageLines = [
-    translate('telegram.verification.singleExchangeWelcome', { exchange: exchangeLabel }),
-    translate('telegram.verification.singleExchangeSummary', { exchange: exchangeLabel }),
-    translate('telegram.verification.sendUidInstruction')
-  ];
+  return buildDefaultPrompt();
+};
 
-  if (depositThreshold !== null) {
-    messageLines.splice(2, 0, translate('telegram.verification.minimumDeposit', { amount: depositThreshold }));
+// Deliver multi-part prompts as individual Telegram messages so administrators can
+// craft onboarding sequences without resorting to complex Markdown layouts.
+const sendPromptMessages = async (bot, chatId, messages, baseOptions = {}) => {
+  const queue = (messages || []).filter((message) => typeof message === 'string' && message.trim().length > 0);
+  for (let index = 0; index < queue.length; index += 1) {
+    const message = queue[index];
+    const isLast = index === queue.length - 1;
+    const options = isLast ? baseOptions : { ...baseOptions, reply_markup: undefined };
+    const cleanedOptions = Object.entries(options || {}).reduce((accumulator, [key, value]) => {
+      if (typeof value !== 'undefined') {
+        accumulator[key] = value;
+      }
+      return accumulator;
+    }, {});
+    await bot.sendMessage(chatId, message, Object.keys(cleanedOptions).length ? cleanedOptions : undefined);
   }
-
-  if (affiliateLink) {
-    messageLines.push('', translate('telegram.verification.affiliateLinkLabel', { link: affiliateLink }));
-  }
-
-  return messageLines.join('\n');
 };
 
 export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerifier, configUpdater, translator }) => async (msg, argsText) => {
@@ -389,16 +425,28 @@ export const createTelegramSettingsHandler = ({ bot, telegramConfig, volumeVerif
       }
       case 'start_message': {
         const rawMessage = (argsText || '').replace(/^\s*start_message\s*/i, '');
-        if (!rawMessage) {
-          throw new Error(translate('telegram.settings.startMessageUsage'));
+        const trimmedInput = rawMessage.trim();
+        const usageMessage = translate('telegram.settings.startMessageUsage', {
+          delimiter: START_MESSAGE_DELIMITER
+        });
+
+        if (!trimmedInput) {
+          throw new Error(usageMessage);
         }
 
-        const shouldClear = ['clear', 'none', 'default', 'reset'].includes(rawMessage.trim().toLowerCase());
-        const messageValue = shouldClear ? null : rawMessage.replace(/\\n/g, '\n');
-        updatedConfig = await configUpdater.setTelegramStartMessage(messageValue);
-        telegramConfig.startMessage = updatedConfig.telegram?.startMessage || '';
-        await bot.sendMessage(chatId, messageValue
-          ? translate('telegram.settings.startMessageUpdated')
+        const shouldClear = ['clear', 'none', 'default', 'reset'].includes(trimmedInput.toLowerCase());
+        const normalisedMessages = shouldClear
+          ? []
+          : normaliseStartMessages(rawMessage.replace(/\\n/g, '\n'));
+
+        if (!shouldClear && normalisedMessages.length === 0) {
+          throw new Error(usageMessage);
+        }
+
+        updatedConfig = await configUpdater.setTelegramStartMessage(normalisedMessages);
+        telegramConfig.startMessage = updatedConfig.telegram?.startMessage || [];
+        await bot.sendMessage(chatId, normalisedMessages.length
+          ? translate('telegram.settings.startMessageUpdated', { count: normalisedMessages.length })
           : translate('telegram.settings.startMessageCleared'));
         break;
       }
@@ -717,6 +765,12 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
   const translate = ensureTranslator(translator);
   const loadConfig = dependencies.loadConfig || loadRuntimeConfig;
 
+  // Normalise legacy string configuration into an array so downstream logic can
+  // iterate predictable message segments regardless of the source format.
+  if (!Array.isArray(telegramConfig.startMessage)) {
+    telegramConfig.startMessage = normaliseStartMessages(telegramConfig.startMessage);
+  }
+
   const bot = new TelegramBot(telegramConfig.token, { polling: true });
   // Recover gracefully from transient polling failures such as ECONNRESET by restarting the
   // long-poll loop with exponential backoff. Without this guard the bot surfaces EFATAL errors
@@ -858,13 +912,13 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
         chatId,
         exchangeId
       });
-      const promptMessage = buildVerificationPrompt({
+      const promptMessages = buildVerificationPrompt({
         telegramConfig,
         translator,
         exchangeConfig: singleExchange
       });
 
-      await bot.sendMessage(chatId, promptMessage, { parse_mode: 'Markdown' });
+      await sendPromptMessages(bot, chatId, promptMessages, { parse_mode: 'Markdown' });
       return;
     }
 
@@ -1561,18 +1615,16 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       chatId
     });
 
-    const followUpLines = [
-      translate('telegram.verification.exchangeSelected', { exchange: exchangeLabel })
-    ];
+    const followUpMessage = translate('telegram.verification.exchangeSelected', { exchange: exchangeLabel });
 
-    const promptMessage = buildVerificationPrompt({
+    const promptMessages = buildVerificationPrompt({
       telegramConfig,
       translator,
       exchangeConfig: selectedExchange
     });
 
-    followUpLines.push('', promptMessage);
-    await bot.sendMessage(chatId, followUpLines.join('\n'), { parse_mode: 'Markdown' });
+    await bot.sendMessage(chatId, followUpMessage);
+    await sendPromptMessages(bot, chatId, promptMessages, { parse_mode: 'Markdown' });
   });
 
   bot.on('message', async (msg) => {

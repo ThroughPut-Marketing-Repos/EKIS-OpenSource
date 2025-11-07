@@ -62,6 +62,15 @@ const extractPlainRecord = (record) => {
   return record || {};
 };
 
+const firstDefined = (...values) => {
+  for (const value of values) {
+    if (value !== null && value !== undefined) {
+      return value;
+    }
+  }
+  return undefined;
+};
+
 const fetchBlofinAggregateTotals = async (exchange) => {
   if (!exchange?.api_key || !exchange?.api_secret || !exchange?.passphrase) {
     logger.warn('Blofin aggregate volume unavailable due to missing credentials.', {
@@ -85,27 +94,47 @@ const fetchBlofinAggregateTotals = async (exchange) => {
   const invitees = await service.fetchInvitees(false);
 
   let totalVolume = 0;
+  let totalDeposit = 0;
   let inviteeCount = 0;
+  let depositValuesProvided = false;
 
   if (Array.isArray(invitees)) {
     inviteeCount = invitees.length;
     invitees.forEach((invitee) => {
       const rawVolume = invitee?.totalTradingVolume ?? invitee?.totalVolume;
       totalVolume += normaliseVolume(rawVolume);
+
+      const rawDeposit = firstDefined(
+        invitee?.totalDeposit,
+        invitee?.totalRecharge,
+        invitee?.totalDepositAmount,
+        invitee?.totalTransfer,
+        invitee?.totalTransferAmount,
+        invitee?.depositAmount
+      );
+      if (rawDeposit !== undefined) {
+        depositValuesProvided = true;
+        totalDeposit += normaliseVolume(rawDeposit);
+      }
     });
   }
 
   logger.info('Blofin aggregate volume fetched successfully.', {
     exchange: exchange.slug || exchange.name || exchange.id,
     inviteeCount,
-    totalVolume
+    totalVolume,
+    depositAvailable: depositValuesProvided,
+    totalDeposit: depositValuesProvided ? totalDeposit : null
   });
 
   return {
     available: true,
     totalVolume,
     inviteeCount,
-    fetchedAt: new Date()
+    fetchedAt: new Date(),
+    depositAvailable: depositValuesProvided,
+    totalDeposit: depositValuesProvided ? totalDeposit : null,
+    depositReason: depositValuesProvided ? null : 'missing_deposit_data'
   };
 };
 
@@ -126,27 +155,47 @@ const fetchBitunixAggregateTotals = async (exchange) => {
   const invitees = await service.fetchInvitees();
 
   let totalVolume = 0;
+  let totalDeposit = 0;
   let inviteeCount = 0;
+  let depositValuesProvided = false;
 
   if (Array.isArray(invitees)) {
     inviteeCount = invitees.length;
     invitees.forEach((invitee) => {
       const rawVolume = invitee?.totalTradingVolume ?? invitee?.totalVolume;
       totalVolume += normaliseVolume(rawVolume);
+
+      const rawDeposit = firstDefined(
+        invitee?.totalDeposit,
+        invitee?.totalRecharge,
+        invitee?.totalDepositAmount,
+        invitee?.totalTransfer,
+        invitee?.totalTransferAmount,
+        invitee?.depositAmount
+      );
+      if (rawDeposit !== undefined) {
+        depositValuesProvided = true;
+        totalDeposit += normaliseVolume(rawDeposit);
+      }
     });
   }
 
   logger.info('Bitunix aggregate volume fetched successfully.', {
     exchange: exchange.slug || exchange.name || exchange.id,
     inviteeCount,
-    totalVolume
+    totalVolume,
+    depositAvailable: depositValuesProvided,
+    totalDeposit: depositValuesProvided ? totalDeposit : null
   });
 
   return {
     available: true,
     totalVolume,
     inviteeCount,
-    fetchedAt: new Date()
+    fetchedAt: new Date(),
+    depositAvailable: depositValuesProvided,
+    totalDeposit: depositValuesProvided ? totalDeposit : null,
+    depositReason: depositValuesProvided ? null : 'deposit_data_unavailable'
   };
 };
 
@@ -216,7 +265,7 @@ export const getTradingVolumeStats = async ({ exchangeId = null } = {}, dependen
 
     const snapshots = await VolumeSnapshot.findAll({
       where,
-      attributes: ['uid', 'exchange', 'exchangeId', 'totalVolume', 'createdAt'],
+      attributes: ['uid', 'exchange', 'exchangeId', 'totalVolume', 'depositAmount', 'createdAt'],
       order: [
         ['exchange', 'ASC'],
         ['uid', 'ASC'],
@@ -242,12 +291,17 @@ export const getTradingVolumeStats = async ({ exchangeId = null } = {}, dependen
       const current = statsByExchange.get(exchange) || {
         exchange,
         totalVolume: 0,
+        totalDeposit: 0,
         accountCount: 0,
         lastSnapshotAt: null,
-        exchangeDbId: snapshot.exchangeId || null
+        exchangeDbId: snapshot.exchangeId || null,
+        exchangeDepositAvailable: null,
+        exchangeTotalDeposit: null,
+        exchangeDepositUnavailableReason: null
       };
 
       current.totalVolume += volume;
+      current.totalDeposit += normaliseVolume(snapshot.depositAmount);
       current.accountCount += 1;
 
       if (!current.lastSnapshotAt || (createdAt && createdAt > current.lastSnapshotAt)) {
@@ -265,9 +319,13 @@ export const getTradingVolumeStats = async ({ exchangeId = null } = {}, dependen
       const current = statsByExchange.get(slug) || {
         exchange: slug,
         totalVolume: 0,
+        totalDeposit: 0,
         accountCount: 0,
         lastSnapshotAt: null,
-        exchangeDbId: aggregate?.id || null
+        exchangeDbId: aggregate?.id || null,
+        exchangeDepositAvailable: null,
+        exchangeTotalDeposit: null,
+        exchangeDepositUnavailableReason: null
       };
       current.exchangeDbId = current.exchangeDbId || aggregate?.id || null;
 
@@ -278,11 +336,24 @@ export const getTradingVolumeStats = async ({ exchangeId = null } = {}, dependen
           ? Number(aggregate.inviteeCount)
           : null;
         current.exchangeTotalsFetchedAt = ensureDate(aggregate.fetchedAt) || new Date();
+
+        if (aggregate.depositAvailable === true) {
+          current.exchangeDepositAvailable = true;
+          current.exchangeTotalDeposit = normaliseVolume(aggregate.totalDeposit);
+          current.exchangeDepositUnavailableReason = null;
+        } else if (aggregate.depositAvailable === false) {
+          current.exchangeDepositAvailable = false;
+          current.exchangeTotalDeposit = null;
+          current.exchangeDepositUnavailableReason = aggregate.depositReason || null;
+        }
       } else if (aggregate && aggregate.available === false) {
         current.exchangeTotalAvailable = false;
         current.exchangeTotalVolume = 0;
         current.exchangeInviteeCount = null;
         current.exchangeTotalsFetchedAt = null;
+        current.exchangeDepositAvailable = false;
+        current.exchangeTotalDeposit = null;
+        current.exchangeDepositUnavailableReason = aggregate.depositReason || aggregate.reason || null;
       }
 
       statsByExchange.set(slug, current);
@@ -295,11 +366,24 @@ export const getTradingVolumeStats = async ({ exchangeId = null } = {}, dependen
         const lastSnapshotAt = ensureDate(entry.lastSnapshotAt);
         const totalsFetchedAt = ensureDate(entry.exchangeTotalsFetchedAt);
         const exchangeTotalAvailable = entry.exchangeTotalAvailable === true;
+        const exchangeDepositAvailable = entry.exchangeDepositAvailable === true;
+        const verifiedDeposit = normaliseVolume(entry.totalDeposit);
+        const exchangeTotalDeposit = exchangeDepositAvailable
+          ? normaliseVolume(entry.exchangeTotalDeposit)
+          : null;
+        const unverifiedVolume = exchangeTotalAvailable
+          ? Math.max(normaliseVolume(entry.exchangeTotalVolume) - normaliseVolume(entry.totalVolume), 0)
+          : null;
+        const unverifiedDeposit = exchangeDepositAvailable
+          ? Math.max(exchangeTotalDeposit - verifiedDeposit, 0)
+          : null;
         return {
           exchange: entry.exchange,
           exchangeDbId: entry.exchangeDbId || null,
           totalVolume: entry.totalVolume,
           totalVolumeFormatted: formatVolume(entry.totalVolume),
+          totalDeposit: verifiedDeposit,
+          totalDepositFormatted: formatVolume(verifiedDeposit),
           accountCount: entry.accountCount,
           lastSnapshotAt,
           lastSnapshotIso: lastSnapshotAt ? lastSnapshotAt.toISOString() : null,
@@ -308,14 +392,26 @@ export const getTradingVolumeStats = async ({ exchangeId = null } = {}, dependen
           exchangeTotalVolumeFormatted: exchangeTotalAvailable
             ? formatVolume(entry.exchangeTotalVolume)
             : null,
+          exchangeDepositAvailable,
+          exchangeTotalDeposit,
+          exchangeTotalDepositFormatted: exchangeDepositAvailable
+            ? formatVolume(exchangeTotalDeposit)
+            : null,
           exchangeInviteeCount: exchangeTotalAvailable ? entry.exchangeInviteeCount : null,
           exchangeTotalsFetchedAt: totalsFetchedAt,
-          exchangeTotalsFetchedAtIso: totalsFetchedAt ? totalsFetchedAt.toISOString() : null
+          exchangeTotalsFetchedAtIso: totalsFetchedAt ? totalsFetchedAt.toISOString() : null,
+          exchangeDepositUnavailableReason: entry.exchangeDepositUnavailableReason || null,
+          unverifiedVolume,
+          unverifiedVolumeFormatted: unverifiedVolume !== null ? formatVolume(unverifiedVolume) : null,
+          unverifiedDeposit,
+          unverifiedDepositFormatted:
+            unverifiedDeposit !== null ? formatVolume(unverifiedDeposit) : null
         };
       })
       .sort((a, b) => b.totalVolume - a.totalVolume);
 
     const grandTotalVolume = exchanges.reduce((sum, entry) => sum + entry.totalVolume, 0);
+    const grandTotalDeposit = exchanges.reduce((sum, entry) => sum + entry.totalDeposit, 0);
     const grandTotalAccounts = exchanges.reduce((sum, entry) => sum + entry.accountCount, 0);
     const exchangeTotalsAvailableCount = exchanges.reduce(
       (sum, entry) => (entry.exchangeTotalAvailable ? sum + 1 : sum),
@@ -325,24 +421,52 @@ export const getTradingVolumeStats = async ({ exchangeId = null } = {}, dependen
       (sum, entry) => (entry.exchangeTotalAvailable ? sum + entry.exchangeTotalVolume : sum),
       0
     );
+    const exchangeDepositAvailableCount = exchanges.reduce(
+      (sum, entry) => (entry.exchangeDepositAvailable ? sum + 1 : sum),
+      0
+    );
+    const grandExchangeDeposit = exchanges.reduce(
+      (sum, entry) => (entry.exchangeDepositAvailable ? sum + entry.exchangeTotalDeposit : sum),
+      0
+    );
     const grandExchangeInvitees = exchanges.reduce((sum, entry) => {
       if (!entry.exchangeTotalAvailable || !Number.isFinite(entry.exchangeInviteeCount)) {
         return sum;
       }
       return sum + Number(entry.exchangeInviteeCount);
     }, 0);
+    const grandUnverifiedVolume = exchanges.reduce(
+      (sum, entry) => (entry.unverifiedVolume !== null ? sum + entry.unverifiedVolume : sum),
+      0
+    );
+    const grandUnverifiedDeposit = exchanges.reduce(
+      (sum, entry) => (entry.unverifiedDeposit !== null ? sum + entry.unverifiedDeposit : sum),
+      0
+    );
 
     return {
       exchanges,
       grandTotalVolume,
+      grandTotalDeposit,
       grandTotalAccounts,
       grandTotalVolumeFormatted: formatVolume(grandTotalVolume),
+      grandTotalDepositFormatted: formatVolume(grandTotalDeposit),
       exchangeTotalsAvailableCount,
       grandExchangeVolume,
       grandExchangeVolumeFormatted: exchangeTotalsAvailableCount > 0
         ? formatVolume(grandExchangeVolume)
         : null,
-      grandExchangeInvitees: exchangeTotalsAvailableCount > 0 ? grandExchangeInvitees : null
+      grandExchangeInvitees: exchangeTotalsAvailableCount > 0 ? grandExchangeInvitees : null,
+      exchangeDepositAvailableCount,
+      grandExchangeDeposit: exchangeDepositAvailableCount > 0 ? grandExchangeDeposit : null,
+      grandExchangeDepositFormatted:
+        exchangeDepositAvailableCount > 0 ? formatVolume(grandExchangeDeposit) : null,
+      grandUnverifiedVolume: exchangeTotalsAvailableCount > 0 ? grandUnverifiedVolume : null,
+      grandUnverifiedVolumeFormatted:
+        exchangeTotalsAvailableCount > 0 ? formatVolume(grandUnverifiedVolume) : null,
+      grandUnverifiedDeposit: exchangeDepositAvailableCount > 0 ? grandUnverifiedDeposit : null,
+      grandUnverifiedDepositFormatted:
+        exchangeDepositAvailableCount > 0 ? formatVolume(grandUnverifiedDeposit) : null
     };
   } catch (error) {
     logger.error('Failed to fetch trading volume statistics.', { scope, error: error.message });

@@ -1344,17 +1344,20 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       return;
     }
 
-    const senderId = msg.from?.id ? String(msg.from.id) : null;
-    if (!senderId) {
-      await bot.sendMessage(chatId, translate('telegram.setupGroup.postFromPersonalAccount'));
-      return;
-    }
-
     const groupIdentifier = msg.chat?.username ? `@${msg.chat.username}` : String(chatId);
     const chatTitle = msg.chat?.title || msg.chat?.username || groupIdentifier;
     const isAnonymousSender = msg.sender_chat?.id === chatId
       || msg.sender_chat?.type === 'channel'
       || msg.from?.username === 'GroupAnonymousBot';
+
+    const senderId = msg.from?.id ? String(msg.from.id) : null;
+
+    // Telegram omits msg.from when posting as a channel. Treat those messages as anonymous so
+    // the issuing admin can approve the request instead of rejecting it outright.
+    if (!senderId && !isAnonymousSender) {
+      await bot.sendMessage(chatId, translate('telegram.setupGroup.postFromPersonalAccount'));
+      return;
+    }
 
     if (senderId !== record.adminId && !isAnonymousSender) {
       await bot.sendMessage(chatId, translate('telegram.setupGroup.wrongSender'));
@@ -1372,7 +1375,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       return;
     }
 
-    if (senderId !== record.adminId && isAnonymousSender) {
+    if (isAnonymousSender && senderId !== record.adminId) {
       pendingAnonymousConfirmations.set(code, {
         code,
         adminId: record.adminId,
@@ -1430,7 +1433,7 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
       chatType,
       groupIdentifier,
       chatTitle,
-      initiatorId: senderId
+      initiatorId: senderId || record.adminId
     });
   };
 

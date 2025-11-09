@@ -882,6 +882,68 @@ describe('telegram setupgroup anonymous confirmation', () => {
     expect(adminSuccess?.[1]).toContain('Group linked successfully!');
   });
 
+  it('handles setup codes posted directly in a channel', async () => {
+    const setupHandler = getSetupHandler();
+    expect(setupHandler).toBeDefined();
+
+    const adminChatId = 501;
+    const adminId = 42;
+
+    await setupHandler(
+      { chat: { id: adminChatId, type: 'private' }, from: { id: adminId }, text: '/setupgroup' },
+      [null, undefined]
+    );
+
+    const lastCall = sendMessageMock.mock.calls[sendMessageMock.mock.calls.length - 1];
+    const codeMatch = lastCall[1].match(/code \(valid for .* minutes\): ([A-Z0-9]+)/i);
+    expect(codeMatch).not.toBeNull();
+    const code = codeMatch[1];
+
+    sendMessageMock.mockClear();
+
+    const channelChatId = -1007654321;
+    configUpdater.addTelegramGroup.mockResolvedValue({ groupIds: ['@channelspace'] });
+
+    const messageHandler = handlers.message;
+    expect(messageHandler).toBeDefined();
+
+    await messageHandler({
+      chat: { id: channelChatId, type: 'channel', title: 'Channel Space', username: 'channelspace' },
+      sender_chat: { id: channelChatId, type: 'channel', title: 'Channel Space' },
+      text: code
+    });
+
+    expect(sendMessageMock.mock.calls).toHaveLength(2);
+    const [channelPrompt, adminPrompt] = sendMessageMock.mock.calls;
+
+    expect(channelPrompt[0]).toEqual(channelChatId);
+    expect(channelPrompt[1]).toContain('posted anonymously');
+
+    expect(adminPrompt[0]).toEqual(adminChatId);
+    expect(adminPrompt[1]).toContain(`/setupgroup confirm ${code} ${channelChatId}`);
+    expect(adminPrompt[2]).toEqual(expect.objectContaining({
+      disable_web_page_preview: true,
+      reply_markup: expect.objectContaining({ inline_keyboard: expect.any(Array) })
+    }));
+
+    const initialCallCount = sendMessageMock.mock.calls.length;
+
+    const confirmCommand = `/setupgroup confirm ${code} ${channelChatId}`;
+    await setupHandler(
+      { chat: { id: adminChatId, type: 'private' }, from: { id: adminId }, text: confirmCommand },
+      [null, `confirm ${code} ${channelChatId}`]
+    );
+
+    expect(configUpdater.addTelegramGroup).toHaveBeenCalledWith({ groupId: '@channelspace', label: 'Channel Space' });
+
+    const newCalls = sendMessageMock.mock.calls.slice(initialCallCount);
+    const channelSuccess = newCalls.find(([target]) => target === channelChatId);
+    const adminSuccess = newCalls.find(([target]) => target === adminChatId && target !== channelChatId);
+
+    expect(channelSuccess?.[1]).toContain('space is now linked');
+    expect(adminSuccess?.[1]).toContain('Group linked successfully!');
+  });
+
   it('rejects setup codes posted by unauthorised users', async () => {
     const setupHandler = getSetupHandler();
     expect(setupHandler).toBeDefined();

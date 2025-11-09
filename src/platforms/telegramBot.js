@@ -1437,6 +1437,30 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     });
   };
 
+  // Telegram delivers setup code posts via the `message` event for groups and the
+  // `channel_post` event for channels. This helper keeps the lookup logic in one
+  // place so both event types can trigger the same linking flow.
+  const processPotentialSetupCodeMessage = async (msg) => {
+    if (!msg?.text) {
+      return false;
+    }
+
+    const trimmedText = msg.text.trim();
+
+    if (!trimmedText) {
+      return false;
+    }
+
+    cleanupExpiredGroupLinks();
+    const pendingRecord = pendingGroupLinks.get(trimmedText);
+    if (!pendingRecord) {
+      return false;
+    }
+
+    await handleGroupSetupCodeMessage(msg, trimmedText, pendingRecord);
+    return true;
+  };
+
   bot.onText(/\/start/i, async (msg) => {
     const chatId = msg.chat.id;
     const chatType = msg.chat?.type || 'unknown';
@@ -1630,20 +1654,19 @@ export const createTelegramBot = (telegramConfig, volumeVerifier, dependencies =
     await sendPromptMessages(bot, chatId, promptMessages, { parse_mode: 'Markdown' });
   });
 
+  bot.on('channel_post', async (msg) => {
+    if (await processPotentialSetupCodeMessage(msg)) {
+      return;
+    }
+  });
+
   bot.on('message', async (msg) => {
-    if (!msg.text) {
+    if (await processPotentialSetupCodeMessage(msg)) {
       return;
     }
 
-    const trimmedText = msg.text.trim();
-
-    if (trimmedText) {
-      cleanupExpiredGroupLinks();
-      const pendingRecord = pendingGroupLinks.get(trimmedText);
-      if (pendingRecord) {
-        await handleGroupSetupCodeMessage(msg, trimmedText, pendingRecord);
-        return;
-      }
+    if (!msg?.text) {
+      return;
     }
 
     const chatId = msg.chat.id;

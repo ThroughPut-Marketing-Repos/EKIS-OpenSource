@@ -904,10 +904,10 @@ describe('telegram setupgroup anonymous confirmation', () => {
     const channelChatId = -1007654321;
     configUpdater.addTelegramGroup.mockResolvedValue({ groupIds: ['@channelspace'] });
 
-    const messageHandler = handlers.message;
-    expect(messageHandler).toBeDefined();
+    const channelPostHandler = handlers.channel_post;
+    expect(channelPostHandler).toBeDefined();
 
-    await messageHandler({
+    await channelPostHandler({
       chat: { id: channelChatId, type: 'channel', title: 'Channel Space', username: 'channelspace' },
       sender_chat: { id: channelChatId, type: 'channel', title: 'Channel Space' },
       text: code

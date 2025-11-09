@@ -43,7 +43,8 @@ verification flow. The bot replies with a detailed checklist:
 2. Post the generated setup code inside that space. The code expires after 15 minutes and only the admin who created it can
    complete the process. If Telegram masks their identity (anonymous admin or "post as channel" mode), the bot DM's them
    with an approval prompt instead of linking automatically. Channel posts now follow the same confirmation flow, so the
-   admin only needs to approve the prompt that arrives in their direct messages.
+   admin only needs to approve the prompt that arrives in their direct messages. Under the hood the bot listens to both the
+   `message` and `channel_post` events so codes published in either groups or channels reach the same handler.
 3. The bot confirms the link both in the group and via direct message, then persists the chat ID in the configuration so
    future verifications automatically create invite links for the new destination.
 

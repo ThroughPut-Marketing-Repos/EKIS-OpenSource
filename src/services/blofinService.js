@@ -149,11 +149,12 @@ class BlofinService {
       }
 
       const lastRecord = records[records.length - 1];
-      if (!lastRecord?.id) {
+      const paginationCursor = lastRecord?.uid ?? lastRecord?.id;
+      if (!paginationCursor) {
         break;
       }
 
-      afterCursor = lastRecord.id;
+      afterCursor = paginationCursor;
       page += 1;
     }
 

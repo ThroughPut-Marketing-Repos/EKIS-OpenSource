@@ -71,6 +71,104 @@ const firstDefined = (...values) => {
   return undefined;
 };
 
+const mapBlofinInviteeRecord = (record, source = 'direct') => {
+  if (!record) {
+    return null;
+  }
+
+  const registerTime = ensureDate(record.registerTime);
+  const totalTradingVolume = normaliseVolume(firstDefined(
+    record.totalTradingVolume,
+    record.tradeVol90Day,
+    record.tradeVol30Day
+  ));
+  const totalDeposit = normaliseVolume(firstDefined(
+    record.totalDeposit,
+    record.totalDepositAmount,
+    record.depositAmount30Day,
+    record.depositAmount
+  ));
+  const totalWithdrawal = normaliseVolume(firstDefined(
+    record.totalWithdrawal,
+    record.withdrawalAmount
+  ));
+  const equity = normaliseVolume(firstDefined(record.equity, record.totalEquity));
+
+  return {
+    id: record.id || null,
+    uid: record.uid ? String(record.uid) : null,
+    source,
+    registerTime,
+    registerTimeIso: registerTime ? registerTime.toISOString() : null,
+    totalTradingVolume,
+    totalTradingVolumeFormatted: formatVolume(totalTradingVolume),
+    totalDeposit,
+    totalDepositFormatted: formatVolume(totalDeposit),
+    totalWithdrawal,
+    totalWithdrawalFormatted: formatVolume(totalWithdrawal),
+    kycLevel: record.kycLevel ?? null,
+    referralCode: record.referralCode || null,
+    couponDiscount: record.couponDiscount || null,
+    takerVol30Day: normaliseVolume(record.takerVol30Day),
+    makerVol30Day: normaliseVolume(record.makerVol30Day),
+    tradeVol30Day: normaliseVolume(record.tradeVol30Day),
+    takerVol90Day: normaliseVolume(record.takerVol90Day),
+    makerVol90Day: normaliseVolume(record.makerVol90Day),
+    tradeVol90Day: normaliseVolume(record.tradeVol90Day),
+    depositAmount30Day: normaliseVolume(record.depositAmount30Day),
+    vipLevel: Number.isFinite(record.vipLevel) ? Number(record.vipLevel) : null,
+    equity,
+    equityFormatted: formatVolume(equity)
+  };
+};
+
+const summariseInvitees = (invitees = []) => {
+  const safeInvitees = invitees.filter(Boolean);
+  const inviteeCount = safeInvitees.length;
+  const totalVolume = safeInvitees.reduce((sum, invitee) => sum + normaliseVolume(invitee.totalTradingVolume), 0);
+  const totalDeposit = safeInvitees.reduce((sum, invitee) => sum + normaliseVolume(invitee.totalDeposit), 0);
+
+  return {
+    invitees: inviteeCount,
+    volume: totalVolume,
+    deposit: totalDeposit,
+    volumeFormatted: formatVolume(totalVolume),
+    depositFormatted: formatVolume(totalDeposit)
+  };
+};
+
+const mapBlofinSubAffiliate = (record) => {
+  if (!record) {
+    return null;
+  }
+  const createTime = ensureDate(record.createTime);
+  const totalTradingVolume = normaliseVolume(record.totalTradingVolume);
+  const totalTradingFee = normaliseVolume(record.totalTradingFee);
+  const totalCommission = normaliseVolume(record.totalCommision);
+  const myCommission = normaliseVolume(record.myCommision);
+
+  return {
+    id: record.id || null,
+    uid: record.uid ? String(record.uid) : null,
+    commissionRate: record.commissionRate || null,
+    createTime,
+    createTimeIso: createTime ? createTime.toISOString() : null,
+    upperAffiliate: record.upperAffiliate || null,
+    invitees: Number.isFinite(Number(record.invitees)) ? Number(record.invitees) : null,
+    totalTradedUsers: Number.isFinite(Number(record.totalTradedUsers)) ? Number(record.totalTradedUsers) : null,
+    totalTradingVolume,
+    totalTradingVolumeFormatted: formatVolume(totalTradingVolume),
+    totalTradingFee,
+    totalTradingFeeFormatted: formatVolume(totalTradingFee),
+    totalCommission,
+    totalCommissionFormatted: formatVolume(totalCommission),
+    myCommission,
+    myCommissionFormatted: formatVolume(myCommission),
+    tag: record.tag || null,
+    kycLevel: record.kycLevel ?? null
+  };
+};
+
 const fetchBlofinAggregateTotals = async (exchange) => {
   if (!exchange?.api_key || !exchange?.api_secret || !exchange?.passphrase) {
     logger.warn('Blofin aggregate volume unavailable due to missing credentials.', {
@@ -204,6 +302,97 @@ const aggregateFetchers = {
   bitunix: fetchBitunixAggregateTotals
 };
 
+const fetchBlofinAffiliateDetails = async ({ exchange, uid = null }) => {
+  if (!exchange?.api_key || !exchange?.api_secret || !exchange?.passphrase) {
+    logger.warn('Blofin affiliate details unavailable due to missing credentials.', {
+      exchange: exchange?.slug || exchange?.name || exchange?.id
+    });
+    return { available: false, reason: 'missing_credentials' };
+  }
+
+  const service = new BlofinService(
+    exchange.api_key,
+    exchange.api_secret,
+    exchange.passphrase,
+    Boolean(exchange.sub_affiliate_invitees),
+    exchange.name || null
+  );
+
+  logger.info('Fetching Blofin affiliate details for statistics.', {
+    exchange: exchange.slug || exchange.name || exchange.id,
+    uid: uid || null
+  });
+
+  const [basicInfoResult, referralCodesResult] = await Promise.allSettled([
+    service.getAffiliateBasicInfo(),
+    service.getReferralCodes()
+  ]);
+
+  if (basicInfoResult.status === 'rejected') {
+    logger.warn('Failed to fetch Blofin affiliate basic info.', {
+      exchange: exchange.slug || exchange.name || exchange.id,
+      error: basicInfoResult.reason?.message || basicInfoResult.reason
+    });
+  }
+  if (referralCodesResult.status === 'rejected') {
+    logger.warn('Failed to fetch Blofin referral codes.', {
+      exchange: exchange.slug || exchange.name || exchange.id,
+      error: referralCodesResult.reason?.message || referralCodesResult.reason
+    });
+  }
+
+  const directInviteesRaw = await service.getAllDirectInvitees({ uid });
+  const includeSubs = Boolean(exchange.sub_affiliate_invitees);
+  const subInviteesRaw = includeSubs ? await service.getAllSubInvitees({ uid }) : [];
+  const subAffiliatesRaw = includeSubs ? await service.getAllSubAffiliates() : [];
+
+  const directInvitees = directInviteesRaw
+    .map((record) => mapBlofinInviteeRecord(record, 'direct'))
+    .filter(Boolean)
+    .sort((a, b) => b.totalTradingVolume - a.totalTradingVolume);
+  const subInvitees = subInviteesRaw
+    .map((record) => mapBlofinInviteeRecord(record, 'sub'))
+    .filter(Boolean)
+    .sort((a, b) => b.totalTradingVolume - a.totalTradingVolume);
+  const subAffiliates = subAffiliatesRaw
+    .map((record) => mapBlofinSubAffiliate(record))
+    .filter(Boolean)
+    .sort((a, b) => b.totalTradingVolume - a.totalTradingVolume);
+
+  const totals = {
+    direct: summariseInvitees(directInvitees),
+    sub: summariseInvitees(subInvitees)
+  };
+  totals.combined = summariseInvitees([...directInvitees, ...subInvitees]);
+
+  logger.info('Blofin affiliate details fetched.', {
+    exchange: exchange.slug || exchange.name || exchange.id,
+    directInvitees: totals.direct.invitees,
+    subInvitees: totals.sub.invitees,
+    filteredUid: uid || null
+  });
+
+  return {
+    available: true,
+    fetchedAt: new Date(),
+    filteredUid: uid || null,
+    type: exchange.type || 'blofin',
+    basicInfo: basicInfoResult.status === 'fulfilled' ? basicInfoResult.value?.data || null : null,
+    referralCodes: referralCodesResult.status === 'fulfilled'
+      ? (Array.isArray(referralCodesResult.value?.data) ? referralCodesResult.value.data : [])
+      : [],
+    directInvitees,
+    subInvitees,
+    subAffiliates,
+    supportsSubAffiliates: includeSubs,
+    totals
+  };
+};
+
+const affiliateFetchers = {
+  blofin: fetchBlofinAffiliateDetails
+};
+
 const defaultFetchExchangeTotals = async ({ exchangeId = null, exchangeRecords = [] } = {}) => {
   const totals = new Map();
 
@@ -246,12 +435,34 @@ const defaultFetchExchangeTotals = async ({ exchangeId = null, exchangeRecords =
   return totals;
 };
 
+const defaultFetchAffiliateDetails = async ({ exchangeRecord, uid }) => {
+  if (!exchangeRecord) {
+    return null;
+  }
+
+  const fetcher = affiliateFetchers[exchangeRecord.type];
+  if (!fetcher) {
+    return { available: false, reason: 'unsupported_exchange', type: exchangeRecord.type };
+  }
+
+  try {
+    return await fetcher({ exchange: exchangeRecord, uid });
+  } catch (error) {
+    logger.error('Failed to fetch affiliate details for exchange.', {
+      exchange: exchangeRecord.slug || exchangeRecord.name || exchangeRecord.id,
+      type: exchangeRecord.type,
+      error: error.message
+    });
+    return { available: false, reason: 'fetch_failed', error: error.message };
+  }
+};
+
 /**
  * Aggregate the latest trading volume snapshots for each UID.
  * Returns totals grouped by exchange along with formatted values
  * to simplify presentation across chat platforms.
  */
-export const getTradingVolumeStats = async ({ exchangeId = null } = {}, dependencies = {}) => {
+export const getTradingVolumeStats = async ({ exchangeId = null, includeAffiliateDetails = false, affiliateUid = null } = {}, dependencies = {}) => {
   const { VolumeSnapshot, Exchange } = getModels();
   const scope = exchangeId || 'all';
 
@@ -312,6 +523,19 @@ export const getTradingVolumeStats = async ({ exchangeId = null } = {}, dependen
     }
 
     const exchangeRecords = await Exchange.findAll();
+    const plainExchangeRecords = exchangeRecords
+      .map((record) => {
+        const plain = extractPlainRecord(record);
+        const slug = normaliseExchangeSlug(plain?.name, plain?.id);
+        if (!slug) {
+          return null;
+        }
+        return { ...plain, slug };
+      })
+      .filter(Boolean);
+
+    const exchangeRecordMap = new Map(plainExchangeRecords.map((record) => [record.slug, record]));
+
     const fetchExchangeTotals = dependencies.fetchExchangeTotals || defaultFetchExchangeTotals;
     const aggregateTotals = await fetchExchangeTotals({ exchangeId, exchangeRecords });
 
@@ -409,6 +633,24 @@ export const getTradingVolumeStats = async ({ exchangeId = null } = {}, dependen
         };
       })
       .sort((a, b) => b.totalVolume - a.totalVolume);
+
+    if (includeAffiliateDetails) {
+      const fetchAffiliateDetails = dependencies.fetchAffiliateDetails || defaultFetchAffiliateDetails;
+      for (const entry of exchanges) {
+        const exchangeRecord = exchangeRecordMap.get(entry.exchange);
+        if (!exchangeRecord) {
+          continue;
+        }
+        const details = await fetchAffiliateDetails({
+          exchangeRecord,
+          uid: affiliateUid,
+          statsEntry: entry
+        });
+        if (details) {
+          entry.affiliateDetails = details;
+        }
+      }
+    }
 
     const grandTotalVolume = exchanges.reduce((sum, entry) => sum + entry.totalVolume, 0);
     const grandTotalDeposit = exchanges.reduce((sum, entry) => sum + entry.totalDeposit, 0);

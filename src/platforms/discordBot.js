@@ -970,31 +970,115 @@ export const handleStatsCommand = async (message, args, context) => {
     return;
   }
 
+  const pendingArgs = Array.from(args);
   let exchangeFilter = null;
   let scopeLabel = translate('discord.stats.scopeAll');
+  let uidFilter = null;
 
-  if (args.length) {
-    const candidate = args[0].toLowerCase();
-    if (candidate !== 'all') {
+  if (pendingArgs.length) {
+    const candidate = pendingArgs[0].toLowerCase();
+    if (candidate === 'all') {
+      pendingArgs.shift();
+    } else {
       const exchangeConfig = volumeVerifier.getExchangeConfig ? volumeVerifier.getExchangeConfig(candidate) : null;
-      if (!exchangeConfig) {
-        await message.reply(translate('discord.stats.unknownExchange', { exchange: args[0] }));
+      if (exchangeConfig) {
+        exchangeFilter = candidate;
+        scopeLabel = exchangeConfig.description || exchangeConfig.name || candidate;
+        pendingArgs.shift();
+      } else if (pendingArgs.length > 1) {
+        await message.reply(translate('discord.stats.unknownExchange', { exchange: pendingArgs[0] }));
         return;
       }
-      exchangeFilter = candidate;
-      scopeLabel = exchangeConfig.description || exchangeConfig.name || candidate;
     }
   }
 
+  if (pendingArgs.length) {
+    uidFilter = pendingArgs.shift();
+  }
+
+  const resolveValue = (value) => {
+    if (value === null || typeof value === 'undefined' || value === '') {
+      return translate('common.labels.notAvailable');
+    }
+    return value;
+  };
+
+  const formatInviteeLine = (invitee) => {
+    const kyc = typeof invitee.kycLevel !== 'undefined' && invitee.kycLevel !== null
+      ? invitee.kycLevel
+      : translate('common.labels.notAvailable');
+    const referral = invitee.referralCode || translate('common.labels.notAvailable');
+    const vip = typeof invitee.vipLevel !== 'undefined' && invitee.vipLevel !== null
+      ? invitee.vipLevel
+      : translate('common.labels.notAvailable');
+    return translate('discord.stats.inviteeLine', {
+      uid: invitee.uid || translate('common.labels.notAvailable'),
+      volume: invitee.totalTradingVolumeFormatted,
+      deposit: invitee.totalDepositFormatted,
+      withdrawal: invitee.totalWithdrawalFormatted || translate('common.labels.notAvailable'),
+      kycLevel: kyc,
+      referral,
+      vip
+    });
+  };
+
+  const chunkAndSend = async (lines) => {
+    const MAX_LENGTH = 1800;
+    let buffer = '';
+    let firstMessage = true;
+
+    const flush = async () => {
+      if (!buffer.trim()) {
+        return;
+      }
+      if (firstMessage) {
+        await message.reply(buffer);
+        firstMessage = false;
+      } else {
+        await message.channel.send(buffer);
+      }
+      buffer = '';
+    };
+
+    for (const line of lines) {
+      const candidate = buffer ? `${buffer}\n${line}` : line;
+      if (candidate.length > MAX_LENGTH) {
+        await flush();
+        if (line.length > MAX_LENGTH) {
+          const segments = line.match(/.{1,1500}/g) || [line];
+          for (const segment of segments) {
+            if (firstMessage) {
+              await message.reply(segment);
+              firstMessage = false;
+            } else {
+              await message.channel.send(segment);
+            }
+          }
+        } else {
+          buffer = line;
+        }
+      } else {
+        buffer = candidate;
+      }
+    }
+
+    await flush();
+  };
+
   try {
-    const stats = await statsService.getTradingVolumeStats({ exchangeId: exchangeFilter });
+    const stats = await statsService.getTradingVolumeStats({
+      exchangeId: exchangeFilter,
+      includeAffiliateDetails: true,
+      affiliateUid: uidFilter || null
+    });
 
     if (!stats.exchanges.length) {
       await message.reply(translate('discord.stats.noData', { scope: scopeLabel }));
       return;
     }
 
-    const lines = [translate('discord.stats.header', { scope: scopeLabel })];
+    const headerKey = uidFilter ? 'headerWithFilter' : 'header';
+    const lines = [translate(`discord.stats.${headerKey}`, { scope: scopeLabel, uid: uidFilter })];
 
     stats.exchanges.forEach((entry) => {
       const exchangeConfig = volumeVerifier.getExchangeConfig ? volumeVerifier.getExchangeConfig(entry.exchange) : null;
@@ -1002,34 +1086,153 @@ export const handleStatsCommand = async (message, args, context) => {
       const lastUpdated = entry.lastSnapshotIso
         ? translate('discord.stats.lastUpdated', { timestamp: entry.lastSnapshotIso })
         : translate('discord.stats.lastUpdatedUnknown');
-      const exchangeVolumeDisplay = entry.exchangeTotalAvailable
-        ? entry.exchangeTotalVolumeFormatted
-        : translate('discord.stats.exchangeTotalUnavailable');
-      const inviteeDisplay = entry.exchangeTotalAvailable
-        ? (Number.isFinite(entry.exchangeInviteeCount)
-          ? entry.exchangeInviteeCount
-          : translate('discord.stats.exchangeInviteesUnknown'))
-        : translate('discord.stats.exchangeTotalUnavailable');
-      const exchangeRefreshed = entry.exchangeTotalAvailable
-        ? (entry.exchangeTotalsFetchedAtIso
-          ? translate('discord.stats.exchangeRefreshed', { timestamp: entry.exchangeTotalsFetchedAtIso })
-          : translate('discord.stats.exchangeRefreshedUnknown'))
-        : translate('discord.stats.exchangeTotalUnavailable');
-
-      lines.push(translate('discord.stats.exchangeLine', {
-        name,
-        verifiedVolume: entry.totalVolumeFormatted,
+      lines.push('', translate('discord.stats.exchangeHeader', { name }));
+      lines.push(translate('discord.stats.verifiedSummary', {
         accounts: entry.accountCount,
-        lastUpdated,
-        exchangeVolume: exchangeVolumeDisplay,
-        invitees: inviteeDisplay,
-        exchangeRefreshed
+        volume: entry.totalVolumeFormatted,
+        deposit: entry.totalDepositFormatted,
+        lastUpdated
       }));
+
+      if (entry.unverifiedVolumeFormatted || entry.unverifiedDepositFormatted) {
+        lines.push(translate('discord.stats.unverifiedSummary', {
+          volume: entry.unverifiedVolumeFormatted || translate('common.labels.notAvailable'),
+          deposit: entry.unverifiedDepositFormatted || translate('common.labels.notAvailable')
+        }));
+      }
+
+      if (entry.exchangeTotalAvailable) {
+        const invitees = Number.isFinite(entry.exchangeInviteeCount)
+          ? entry.exchangeInviteeCount
+          : translate('discord.stats.exchangeInviteesUnknown');
+        const refreshed = entry.exchangeTotalsFetchedAtIso
+          ? translate('discord.stats.exchangeRefreshed', { timestamp: entry.exchangeTotalsFetchedAtIso })
+          : translate('discord.stats.exchangeRefreshedUnknown');
+        const depositValue = entry.exchangeDepositAvailable
+          ? entry.exchangeTotalDepositFormatted
+          : translate('common.labels.notAvailable');
+        lines.push(translate('discord.stats.allInviteesSummary', {
+          invitees,
+          volume: entry.exchangeTotalVolumeFormatted || translate('common.labels.notAvailable'),
+          deposit: depositValue,
+          refreshed
+        }));
+      } else {
+        lines.push(translate('discord.stats.exchangeTotalsUnavailableLine'));
+      }
+
+      const affiliate = entry.affiliateDetails;
+      if (affiliate?.available) {
+        const directInvitees = Array.isArray(affiliate.directInvitees) ? affiliate.directInvitees : [];
+        const subInvitees = Array.isArray(affiliate.subInvitees) ? affiliate.subInvitees : [];
+        const subAffiliates = Array.isArray(affiliate.subAffiliates) ? affiliate.subAffiliates : [];
+
+        if (affiliate.basicInfo) {
+          lines.push('', translate('discord.stats.affiliateHeader'));
+          lines.push(translate('discord.stats.basicInfoLine', {
+            commissionRate: resolveValue(affiliate.basicInfo.commissionRate),
+            cashbackRate: resolveValue(affiliate.basicInfo.cashbackRate),
+            totalCommission: resolveValue(affiliate.basicInfo.totalCommission),
+            directInvitees: resolveValue(affiliate.basicInfo.directInvitees),
+            subInvitees: resolveValue(affiliate.basicInfo.subInvitees),
+            tradeInvitees: resolveValue(affiliate.basicInfo.tradeInvitees)
+          }));
+          lines.push(translate('discord.stats.basicInfoVolumeLine', {
+            tradingVolume: resolveValue(affiliate.basicInfo.totalTradingVolume),
+            referralCode: resolveValue(affiliate.basicInfo.referralCode),
+            referralLink: resolveValue(affiliate.basicInfo.referralLink)
+          }));
+        }
+
+        if (Array.isArray(affiliate.referralCodes) && affiliate.referralCodes.length) {
+          lines.push('', translate('discord.stats.referralCodesHeader'));
+          affiliate.referralCodes.forEach((code) => {
+            lines.push(translate('discord.stats.referralCodeLine', {
+              code: resolveValue(code.referralCode),
+              commissionRate: resolveValue(code.commissionRate),
+              cashbackRate: resolveValue(code.cashbackRate),
+              invitees: resolveValue(code.invitees),
+              defaultFlag: code.isDefaultReferralCode === 'true'
+                ? translate('discord.stats.referralDefaultFlag')
+                : '',
+              link: resolveValue(code.referralLink)
+            }));
+          });
+        }
+
+        if (affiliate.totals?.direct) {
+          lines.push('', translate('discord.stats.directTotals', {
+            invitees: affiliate.totals.direct.invitees,
+            volume: affiliate.totals.direct.volumeFormatted,
+            deposit: affiliate.totals.direct.depositFormatted
+          }));
+        }
+
+        const directHeader = translate('discord.stats.directInviteesHeader', {
+          count: directInvitees.length,
+          filter: affiliate.filteredUid
+            ? translate('discord.stats.uidFilterSuffix', { uid: affiliate.filteredUid })
+            : ''
+        });
+        lines.push(directHeader);
+        if (directInvitees.length) {
+          directInvitees.forEach((invitee) => {
+            lines.push(formatInviteeLine(invitee));
+          });
+        } else {
+          lines.push(translate('discord.stats.noInvitees'));
+        }
+
+        if (affiliate.supportsSubAffiliates) {
+          if (affiliate.totals?.sub) {
+            lines.push('', translate('discord.stats.subTotals', {
+              invitees: affiliate.totals.sub.invitees,
+              volume: affiliate.totals.sub.volumeFormatted,
+              deposit: affiliate.totals.sub.depositFormatted
+            }));
+          }
+          const subHeader = translate('discord.stats.subInviteesHeader', {
+            count: subInvitees.length,
+            filter: affiliate.filteredUid
+              ? translate('discord.stats.uidFilterSuffix', { uid: affiliate.filteredUid })
+              : ''
+          });
+          lines.push(subHeader);
+          if (subInvitees.length) {
+            subInvitees.forEach((invitee) => {
+              lines.push(formatInviteeLine(invitee));
+            });
+          } else {
+            lines.push(translate('discord.stats.noInvitees'));
+          }
+
+          if (subAffiliates.length) {
+            lines.push('', translate('discord.stats.subAffiliatesHeader', {
+              count: subAffiliates.length
+            }));
+            subAffiliates.forEach((sub) => {
+              lines.push(translate('discord.stats.subAffiliateLine', {
+                uid: resolveValue(sub.uid),
+                invitees: resolveValue(sub.invitees),
+                traded: resolveValue(sub.totalTradedUsers),
+                volume: sub.totalTradingVolumeFormatted,
+                commission: sub.totalCommissionFormatted,
+                myCommission: sub.myCommissionFormatted || translate('common.labels.notAvailable')
+              }));
+            });
+          }
+        }
+      } else if (affiliate && affiliate.reason) {
+        lines.push('', translate('discord.stats.affiliateUnavailable', {
+          reason: resolveValue(affiliate.reason)
+        }));
+      }
     });
 
     if (stats.exchanges.length > 1) {
       lines.push('', translate('discord.stats.overallLine', {
         volume: stats.grandTotalVolumeFormatted,
+        deposit: stats.grandTotalDepositFormatted,
         accounts: stats.grandTotalAccounts
       }));
 
@@ -1037,15 +1240,19 @@ export const handleStatsCommand = async (message, args, context) => {
         const aggregateInvitees = Number.isFinite(stats.grandExchangeInvitees)
           ? stats.grandExchangeInvitees
           : translate('discord.stats.exchangeInviteesUnknown');
+        const aggregateDeposit = stats.exchangeDepositAvailableCount > 0
+          ? stats.grandExchangeDepositFormatted || translate('common.labels.notAvailable')
+          : translate('common.labels.notAvailable');
         lines.push(translate('discord.stats.overallExchangeLine', {
           volume: stats.grandExchangeVolumeFormatted,
+          deposit: aggregateDeposit,
           invitees: aggregateInvitees,
           exchanges: stats.exchangeTotalsAvailableCount
         }));
       }
     }
 
-    await message.reply(lines.join('\n'));
+    await chunkAndSend(lines);
   } catch (error) {
     logger.error(`Discord stats command failed: ${error.message}`);
     await message.reply(translate('discord.stats.error', { message: error.message }));

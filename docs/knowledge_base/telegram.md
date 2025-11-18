@@ -118,13 +118,24 @@ separate message so it stands out in longer sequences.
 
 ## Trading statistics
 
-Administrators (including the registered owner) can send `/stats [exchangeId|all]` to retrieve the latest trading volume
-totals captured in `VolumeSnapshot`. Without arguments the command aggregates every configured exchange, reporting the
-verified volume, number of tracked accounts, and the timestamp of the most recent snapshot. When the exchange credentials
-support exporting invitees (such as Blofin or Bitunix) an additional line surfaces the total trading volume and invitee
-count reported directly by the exchange. Providing a specific `exchangeId` limits the summary to that integration.
-Results are localised through the translation system and errors are logged with the requesting Telegram user ID for
-auditing. The command refuses to run for non-admins, aligning with the behaviour of other maintenance tools.
+Administrators (including the registered owner) can send `/stats [exchangeId|all] [uid]` to retrieve a consolidated
+affiliate overview. Without arguments the bot summarises every configured exchange, reporting the verified volume,
+verified deposits, the number of accounts tracked in `VolumeSnapshot`, and the timestamp of the most recent snapshot.
+Passing an `exchangeId` limits the summary to a single connector, while supplying a UID filters the invitee lists so
+support staff can review a single user without wading through every entry.
+
+When the configured exchange supports invitee exports (e.g. Blofin) the response now includes:
+
+* Affiliate programme basics &ndash; commission rate, cashback, direct/sub invitee counts, referral links, and referral
+  code breakdowns.
+* Aggregate invitee totals, split between direct and sub affiliates, including both trading volume and deposits for
+  verified and unverified users.
+* Per-invitee details (UID, volume, deposit, withdrawal, KYC status, referral code, and VIP level) and sub-affiliate
+  performance where available.
+
+Results are localised through the translation system, chunked into multiple Telegram messages when necessary, and errors
+are logged with the requesting Telegram user ID for auditing. Non-admins continue to receive the standard unauthorised
+response to keep maintenance tooling private.
 
 ## Owner workflow
 

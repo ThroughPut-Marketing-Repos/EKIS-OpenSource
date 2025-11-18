@@ -555,31 +555,103 @@ export const createTelegramStatsHandler = ({ bot, telegramConfig, volumeVerifier
     return;
   }
 
+  const pendingArgs = [...args];
   let exchangeFilter = null;
   let scopeLabel = translate('telegram.stats.scopeAll');
+  let uidFilter = null;
 
-  if (args.length) {
-    const candidate = args[0].toLowerCase();
-    if (candidate !== 'all') {
+  if (pendingArgs.length) {
+    const candidate = pendingArgs[0].toLowerCase();
+    if (candidate === 'all') {
+      pendingArgs.shift();
+    } else {
       const exchangeConfig = volumeVerifier.getExchangeConfig ? volumeVerifier.getExchangeConfig(candidate) : null;
-      if (!exchangeConfig) {
-        await bot.sendMessage(chatId, translate('telegram.stats.unknownExchange', { exchange: args[0] }));
+      if (exchangeConfig) {
+        exchangeFilter = candidate;
+        scopeLabel = exchangeConfig.description || exchangeConfig.name || candidate;
+        pendingArgs.shift();
+      } else if (pendingArgs.length > 1) {
+        await bot.sendMessage(chatId, translate('telegram.stats.unknownExchange', { exchange: pendingArgs[0] }));
         return;
       }
-      exchangeFilter = candidate;
-      scopeLabel = exchangeConfig.description || exchangeConfig.name || candidate;
     }
   }
 
+  if (pendingArgs.length) {
+    uidFilter = pendingArgs.shift();
+  }
+
+  const resolveValue = (value) => {
+    if (value === null || typeof value === 'undefined' || value === '') {
+      return translate('common.labels.notAvailable');
+    }
+    return value;
+  };
+
+  const formatInviteeLine = (invitee) => {
+    const kyc = typeof invitee.kycLevel !== 'undefined' && invitee.kycLevel !== null
+      ? invitee.kycLevel
+      : translate('common.labels.notAvailable');
+    const referral = invitee.referralCode || translate('common.labels.notAvailable');
+    const vip = typeof invitee.vipLevel !== 'undefined' && invitee.vipLevel !== null
+      ? invitee.vipLevel
+      : translate('common.labels.notAvailable');
+    return translate('telegram.stats.inviteeLine', {
+      uid: invitee.uid || translate('common.labels.notAvailable'),
+      volume: invitee.totalTradingVolumeFormatted,
+      deposit: invitee.totalDepositFormatted,
+      withdrawal: invitee.totalWithdrawalFormatted || translate('common.labels.notAvailable'),
+      kycLevel: kyc,
+      referral,
+      vip
+    });
+  };
+
+  const chunkAndSend = async (lines) => {
+    const MAX_LENGTH = 3500;
+    let buffer = '';
+
+    const flush = async () => {
+      if (buffer.trim()) {
+        await bot.sendMessage(chatId, buffer);
+        buffer = '';
+      }
+    };
+
+    for (const line of lines) {
+      const candidate = buffer ? `${buffer}\n${line}` : line;
+      if (candidate.length > MAX_LENGTH) {
+        await flush();
+        if (line.length > MAX_LENGTH) {
+          const segments = line.match(/.{1,3000}/g) || [line];
+          for (const segment of segments) {
+            await bot.sendMessage(chatId, segment);
+          }
+        } else {
+          buffer = line;
+        }
+      } else {
+        buffer = candidate;
+      }
+    }
+
+    await flush();
+  };
+
   try {
-    const stats = await statisticsService.getTradingVolumeStats({ exchangeId: exchangeFilter });
+    const stats = await statisticsService.getTradingVolumeStats({
+      exchangeId: exchangeFilter,
+      includeAffiliateDetails: true,
+      affiliateUid: uidFilter || null
+    });
 
     if (!stats.exchanges.length) {
       await bot.sendMessage(chatId, translate('telegram.stats.noData', { scope: scopeLabel }));
       return;
     }
 
-    const responseLines = [translate('telegram.stats.header', { scope: scopeLabel })];
+    const headerKey = uidFilter ? 'headerWithFilter' : 'header';
+    const responseLines = [translate(`telegram.stats.${headerKey}`, { scope: scopeLabel, uid: uidFilter })];
 
     stats.exchanges.forEach((entry) => {
       const exchangeConfig = volumeVerifier.getExchangeConfig ? volumeVerifier.getExchangeConfig(entry.exchange) : null;
@@ -587,34 +659,151 @@ export const createTelegramStatsHandler = ({ bot, telegramConfig, volumeVerifier
       const lastUpdated = entry.lastSnapshotIso
         ? translate('telegram.stats.lastUpdated', { timestamp: entry.lastSnapshotIso })
         : translate('telegram.stats.lastUpdatedUnknown');
-      const exchangeVolumeDisplay = entry.exchangeTotalAvailable
-        ? entry.exchangeTotalVolumeFormatted
-        : translate('telegram.stats.exchangeTotalUnavailable');
-      const inviteeDisplay = entry.exchangeTotalAvailable
-        ? (Number.isFinite(entry.exchangeInviteeCount)
-          ? entry.exchangeInviteeCount
-          : translate('telegram.stats.exchangeInviteesUnknown'))
-        : translate('telegram.stats.exchangeTotalUnavailable');
-      const exchangeRefreshed = entry.exchangeTotalAvailable
-        ? (entry.exchangeTotalsFetchedAtIso
-          ? translate('telegram.stats.exchangeRefreshed', { timestamp: entry.exchangeTotalsFetchedAtIso })
-          : translate('telegram.stats.exchangeRefreshedUnknown'))
-        : translate('telegram.stats.exchangeTotalUnavailable');
-
-      responseLines.push(translate('telegram.stats.exchangeLine', {
-        name,
-        verifiedVolume: entry.totalVolumeFormatted,
+      responseLines.push('', translate('telegram.stats.exchangeHeader', { name }));
+      responseLines.push(translate('telegram.stats.verifiedSummary', {
         accounts: entry.accountCount,
-        lastUpdated,
-        exchangeVolume: exchangeVolumeDisplay,
-        invitees: inviteeDisplay,
-        exchangeRefreshed
+        volume: entry.totalVolumeFormatted,
+        deposit: entry.totalDepositFormatted,
+        lastUpdated
       }));
+
+      if (entry.unverifiedVolumeFormatted || entry.unverifiedDepositFormatted) {
+        responseLines.push(translate('telegram.stats.unverifiedSummary', {
+          volume: entry.unverifiedVolumeFormatted || translate('common.labels.notAvailable'),
+          deposit: entry.unverifiedDepositFormatted || translate('common.labels.notAvailable')
+        }));
+      }
+
+      if (entry.exchangeTotalAvailable) {
+        const invitees = Number.isFinite(entry.exchangeInviteeCount)
+          ? entry.exchangeInviteeCount
+          : translate('telegram.stats.exchangeInviteesUnknown');
+        const refreshed = entry.exchangeTotalsFetchedAtIso
+          ? translate('telegram.stats.exchangeRefreshed', { timestamp: entry.exchangeTotalsFetchedAtIso })
+          : translate('telegram.stats.exchangeRefreshedUnknown');
+        const depositValue = entry.exchangeDepositAvailable
+          ? entry.exchangeTotalDepositFormatted
+          : translate('common.labels.notAvailable');
+        responseLines.push(translate('telegram.stats.allInviteesSummary', {
+          invitees,
+          volume: entry.exchangeTotalVolumeFormatted || translate('common.labels.notAvailable'),
+          deposit: depositValue,
+          refreshed
+        }));
+      } else {
+        responseLines.push(translate('telegram.stats.exchangeTotalsUnavailableLine'));
+      }
+
+      const affiliate = entry.affiliateDetails;
+      if (affiliate?.available) {
+        const directInvitees = Array.isArray(affiliate.directInvitees) ? affiliate.directInvitees : [];
+        const subInvitees = Array.isArray(affiliate.subInvitees) ? affiliate.subInvitees : [];
+        const subAffiliates = Array.isArray(affiliate.subAffiliates) ? affiliate.subAffiliates : [];
+        if (affiliate.basicInfo) {
+          responseLines.push('', translate('telegram.stats.affiliateHeader'));
+          responseLines.push(translate('telegram.stats.basicInfoLine', {
+            commissionRate: resolveValue(affiliate.basicInfo.commissionRate),
+            cashbackRate: resolveValue(affiliate.basicInfo.cashbackRate),
+            totalCommission: resolveValue(affiliate.basicInfo.totalCommission),
+            directInvitees: resolveValue(affiliate.basicInfo.directInvitees),
+            subInvitees: resolveValue(affiliate.basicInfo.subInvitees),
+            tradeInvitees: resolveValue(affiliate.basicInfo.tradeInvitees)
+          }));
+          responseLines.push(translate('telegram.stats.basicInfoVolumeLine', {
+            tradingVolume: resolveValue(affiliate.basicInfo.totalTradingVolume),
+            referralCode: resolveValue(affiliate.basicInfo.referralCode),
+            referralLink: resolveValue(affiliate.basicInfo.referralLink)
+          }));
+        }
+
+        if (Array.isArray(affiliate.referralCodes) && affiliate.referralCodes.length) {
+          responseLines.push('', translate('telegram.stats.referralCodesHeader'));
+          affiliate.referralCodes.forEach((code) => {
+            responseLines.push(translate('telegram.stats.referralCodeLine', {
+              code: resolveValue(code.referralCode),
+              commissionRate: resolveValue(code.commissionRate),
+              cashbackRate: resolveValue(code.cashbackRate),
+              invitees: resolveValue(code.invitees),
+              defaultFlag: code.isDefaultReferralCode === 'true'
+                ? translate('telegram.stats.referralDefaultFlag')
+                : '',
+              link: resolveValue(code.referralLink)
+            }));
+          });
+        }
+
+        if (affiliate.totals?.direct) {
+          responseLines.push('', translate('telegram.stats.directTotals', {
+            invitees: affiliate.totals.direct.invitees,
+            volume: affiliate.totals.direct.volumeFormatted,
+            deposit: affiliate.totals.direct.depositFormatted
+          }));
+        }
+        const directHeader = translate('telegram.stats.directInviteesHeader', {
+          count: directInvitees.length,
+          filter: affiliate.filteredUid
+            ? translate('telegram.stats.uidFilterSuffix', { uid: affiliate.filteredUid })
+            : ''
+        });
+        responseLines.push(directHeader);
+        if (directInvitees.length) {
+          directInvitees.forEach((invitee) => {
+            responseLines.push(formatInviteeLine(invitee));
+          });
+        } else {
+          responseLines.push(translate('telegram.stats.noInvitees'));
+        }
+
+        if (affiliate.supportsSubAffiliates) {
+          if (affiliate.totals?.sub) {
+            responseLines.push('', translate('telegram.stats.subTotals', {
+              invitees: affiliate.totals.sub.invitees,
+              volume: affiliate.totals.sub.volumeFormatted,
+              deposit: affiliate.totals.sub.depositFormatted
+            }));
+          }
+          const subHeader = translate('telegram.stats.subInviteesHeader', {
+            count: subInvitees.length,
+            filter: affiliate.filteredUid
+              ? translate('telegram.stats.uidFilterSuffix', { uid: affiliate.filteredUid })
+              : ''
+          });
+          responseLines.push(subHeader);
+          if (subInvitees.length) {
+            subInvitees.forEach((invitee) => {
+              responseLines.push(formatInviteeLine(invitee));
+            });
+          } else {
+            responseLines.push(translate('telegram.stats.noInvitees'));
+          }
+
+          if (subAffiliates.length) {
+            responseLines.push('', translate('telegram.stats.subAffiliatesHeader', {
+              count: subAffiliates.length
+            }));
+            subAffiliates.forEach((sub) => {
+              responseLines.push(translate('telegram.stats.subAffiliateLine', {
+                uid: resolveValue(sub.uid),
+                invitees: resolveValue(sub.invitees),
+                traded: resolveValue(sub.totalTradedUsers),
+                volume: sub.totalTradingVolumeFormatted,
+                commission: sub.totalCommissionFormatted,
+                myCommission: sub.myCommissionFormatted || translate('common.labels.notAvailable')
+              }));
+            });
+          }
+        }
+      } else if (affiliate && affiliate.reason) {
+        responseLines.push('', translate('telegram.stats.affiliateUnavailable', {
+          reason: resolveValue(affiliate.reason)
+        }));
+      }
     });
 
     if (stats.exchanges.length > 1) {
       responseLines.push('', translate('telegram.stats.overallLine', {
         volume: stats.grandTotalVolumeFormatted,
+        deposit: stats.grandTotalDepositFormatted,
         accounts: stats.grandTotalAccounts
       }));
 
@@ -622,15 +811,19 @@ export const createTelegramStatsHandler = ({ bot, telegramConfig, volumeVerifier
         const aggregateInvitees = Number.isFinite(stats.grandExchangeInvitees)
           ? stats.grandExchangeInvitees
           : translate('telegram.stats.exchangeInviteesUnknown');
+        const aggregateDeposit = stats.exchangeDepositAvailableCount > 0
+          ? stats.grandExchangeDepositFormatted || translate('common.labels.notAvailable')
+          : translate('common.labels.notAvailable');
         responseLines.push(translate('telegram.stats.overallExchangeLine', {
           volume: stats.grandExchangeVolumeFormatted,
+          deposit: aggregateDeposit,
           invitees: aggregateInvitees,
           exchanges: stats.exchangeTotalsAvailableCount
         }));
       }
     }
 
-    await bot.sendMessage(chatId, responseLines.join('\n'));
+    await chunkAndSend(responseLines);
   } catch (error) {
     logger.error(`Telegram stats command failed: ${error.message}`);
     await bot.sendMessage(chatId, translate('telegram.stats.error', { message: error.message }));

@@ -46,13 +46,10 @@ class BlofinService {
     return Buffer.from(digest, 'utf-8').toString('base64');
   }
 
-  async getSubAffiliateInvitees(params) {
+  buildSignedRequest(method, requestPath) {
     const timestamp = Date.now().toString();
     const nonce = this.generateNonce();
-    const method = 'GET';
-    const requestPath = '/api/v1/affiliate/sub-invitees';
-    const pathWithParams = `${requestPath}${params}`;
-    const signature = this.createSignature(this.apiSecret, nonce, method, timestamp, pathWithParams);
+    const signature = this.createSignature(this.apiSecret, nonce, method, timestamp, requestPath);
 
     const headers = {
       'ACCESS-KEY': this.apiKey,
@@ -63,129 +60,152 @@ class BlofinService {
       'Content-Type': 'application/json'
     };
 
-      try {
-          const url = `${this.baseUrl}${pathWithParams}`;
-          logVerbose(`[Blofin] GET ${url}`);
-          const response = await axios.get(url, {headers});
+    return { headers, timestamp, nonce };
+  }
 
-          // Add detailed response logging
-          logger.debug(`[Blofin] Raw sub-affiliate invitees response: ${JSON.stringify({
-              status: response.status,
-              statusText: response.statusText,
-              data: response.data,
-              url: response.config?.url,
-              method: response.config?.method
-          }, null, 2)}`);
+  async executeGet(pathWithParams, logLabel = 'GET') {
+    const method = 'GET';
+    const { headers } = this.buildSignedRequest(method, pathWithParams);
 
-          const payloadSummary = {
-              status: response.status,
-              hasMore: response.data?.hasMore ?? null,
-              count: Array.isArray(response.data?.data) ? response.data.data.length : 0
-          };
-          logger.info('[Blofin] Sub-affiliate invitees response received.', {
-              ...payloadSummary,
-              payload: response.data
-          });
-          logVerbose('[Blofin] Sub-affiliate invitees response payload.', response.data);
-          return response.data;
-      } catch (error) {
-          if (error.response?.status === 429) {
-              throw error;
-          }
-          const message = error.response?.data || error.message || error;
-      logger.error(`Blofin sub-affiliate invitees error: ${JSON.stringify(message, null, 2)}`);
+    try {
+      const url = `${this.baseUrl}${pathWithParams}`;
+      logVerbose(`[Blofin] ${logLabel} ${url}`);
+      const response = await axios.get(url, { headers });
+      logger.debug(`[Blofin] ${logLabel} response`, {
+        status: response.status,
+        statusText: response.statusText,
+        dataPreview: Array.isArray(response.data?.data)
+          ? `records=${response.data.data.length}`
+          : typeof response.data === 'object'
+            ? Object.keys(response.data)
+            : typeof response.data,
+        requestId: response.headers?.['x-request-id'] || null
+      });
+      return response.data;
+    } catch (error) {
+      if (error.response?.status === 429) {
+        logger.warn('[Blofin] Rate limit exceeded.', {
+          path: pathWithParams,
+          headers: error.response?.headers
+        });
+        throw error;
+      }
+
+      const message = error.response?.data || error.message || error;
+      logger.error(`[Blofin] ${logLabel} request failed: ${JSON.stringify(message, null, 2)}`);
       throw error;
     }
   }
 
+  async fetchPagedResults({
+    endpoint,
+    uid = null,
+    includeEquity = false,
+    limit = 100,
+    maxPages = 50,
+    additionalParams = {}
+  }) {
+    const aggregated = [];
+    let afterCursor = null;
+    let page = 0;
+    const safeEndpoint = endpoint.startsWith('/') ? endpoint : `/${endpoint}`;
+
+    while (page < maxPages) {
+      const params = new URLSearchParams();
+      if (uid) {
+        params.set('uid', uid);
+      }
+      if (!uid) {
+        params.set('limit', String(limit));
+      }
+      if (includeEquity) {
+        params.set('needEquity', 'true');
+      }
+      Object.entries(additionalParams || {}).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== '') {
+          params.set(key, value);
+        }
+      });
+
+      if (!uid && afterCursor) {
+        params.set('after', String(afterCursor));
+      }
+
+      const query = params.toString();
+      const payload = await this.executeGet(`${safeEndpoint}${query ? `?${query}` : ''}`, `GET ${safeEndpoint}`);
+      const records = Array.isArray(payload?.data) ? payload.data : [];
+      aggregated.push(...records);
+
+      logger.info('[Blofin] Retrieved affiliate records page.', {
+        endpoint: safeEndpoint,
+        page: page + 1,
+        fetched: records.length,
+        hasMore: payload?.hasMore ?? null,
+        uidFilter: uid || null
+      });
+
+      if (uid || !records.length || (!payload?.hasMore && records.length < limit)) {
+        break;
+      }
+
+      const lastRecord = records[records.length - 1];
+      if (!lastRecord?.id) {
+        break;
+      }
+
+      afterCursor = lastRecord.id;
+      page += 1;
+    }
+
+    return aggregated;
+  }
+
+  async getSubAffiliateInvitees(params) {
+    const requestPath = '/api/v1/affiliate/sub-invitees';
+    const pathWithParams = `${requestPath}${params}`;
+    return this.executeGet(pathWithParams, 'Sub affiliate invitees');
+  }
+
   async getDirectInvitees(params) {
-    const timestamp = Date.now().toString();
-    const nonce = this.generateNonce();
-    const method = 'GET';
     const requestPath = '/api/v1/affiliate/invitees';
     const pathWithParams = `${requestPath}${params}`;
+    return this.executeGet(pathWithParams, 'Direct invitees');
+  }
 
-    const signature = this.createSignature(this.apiSecret, nonce, method, timestamp, pathWithParams);
+  async getAffiliateBasicInfo() {
+    return this.executeGet('/api/v1/affiliate/basic', 'Affiliate basic');
+  }
 
-    const headers = {
-      'ACCESS-KEY': this.apiKey,
-      'ACCESS-SIGN': signature,
-      'ACCESS-TIMESTAMP': timestamp,
-      'ACCESS-NONCE': nonce,
-      'ACCESS-PASSPHRASE': this.passphrase,
-      'Content-Type': 'application/json'
-    };
+  async getReferralCodes() {
+    return this.executeGet('/api/v1/affiliate/referral-code', 'Affiliate referral codes');
+  }
 
-      try {
-          const url = `${this.baseUrl}${pathWithParams}`;
-          logVerbose(`[Blofin] Initiating GET request to ${url}`);
+  async getAllDirectInvitees({ uid = null, includeEquity = false } = {}) {
+    const limit = includeEquity ? 30 : 200;
+    const records = await this.fetchPagedResults({
+      endpoint: '/api/v1/affiliate/invitees',
+      uid,
+      includeEquity,
+      limit
+    });
+    return records;
+  }
 
-          // Log request details
-          logger.debug(`[Blofin] Direct invitees request details: ${JSON.stringify({
-              url,
-              method: 'GET',
-              headers: {
-                  ...headers,
-                  'ACCESS-KEY': headers['ACCESS-KEY'] ? '***' : undefined,
-                  'ACCESS-SIGN': headers['ACCESS-SIGN'] ? '***' : undefined,
-                  'ACCESS-PASSPHRASE': headers['ACCESS-PASSPHRASE'] ? '***' : undefined
-              },
-              timestamp: new Date().toISOString()
-          }, null, 2)}`);
+  async getAllSubInvitees({ uid = null } = {}) {
+    const records = await this.fetchPagedResults({
+      endpoint: '/api/v1/affiliate/sub-invitees',
+      uid,
+      limit: 30
+    });
+    return records;
+  }
 
-          const response = await axios.get(url, {headers});
-
-          // Log raw response details
-          logger.debug(`[Blofin] Direct invitees raw response: ${JSON.stringify({
-              status: response.status,
-              statusText: response.statusText,
-              data: response.data,
-              timing: response.headers['x-response-time'],
-              requestId: response.headers['x-request-id']
-          }, null, 2)}`);
-
-          const payloadSummary = {
-              status: response.status,
-              hasMore: response.data?.hasMore ?? null,
-              count: Array.isArray(response.data?.data) ? response.data.data.length : 0
-          };
-
-          // Log structured response summary
-          logger.info('[Blofin] Direct invitees response received', {
-              ...payloadSummary,
-              firstRecord: response.data?.data?.[0]?.uid ? {
-                  uid: response.data.data[0].uid,
-                  hasVolume: Boolean(response.data.data[0].totalTradingVolume)
-              } : null,
-              payload: response.data
-          });
-
-          logVerbose('[Blofin] Direct invitees complete response payload', response.data);
-          return response.data;
-      } catch (error) {
-          // Enhanced error logging
-          if (error.response?.status === 429) {
-              logger.warn('[Blofin] Rate limit exceeded for direct invitees request', {
-                  status: error.response.status,
-                  headers: error.response.headers,
-                  resetTime: error.response.headers['rate-limit-reset'],
-                  remainingRequests: error.response.headers['rate-limit-remaining']
-              });
-              throw error;
-          }
-
-          const errorDetails = {
-              message: error.message,
-              code: error.code,
-        status: error.response?.status,
-        statusText: error.response?.statusText,
-        data: error.response?.data,
-        path: pathWithParams
-      };
-    
-      logger.error('[Blofin] Direct invitees request failed', errorDetails);
-      throw error;
-    }
+  async getAllSubAffiliates() {
+    const records = await this.fetchPagedResults({
+      endpoint: '/api/v1/affiliate/sub-affiliates',
+      limit: 100
+    });
+    return records;
   }
 
   async verifyUid(uid, depositThreshold) {

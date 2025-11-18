@@ -74,14 +74,19 @@ reloads the `volumeVerifier` instance so subsequent verification requests immedi
 
 ## Trading statistics
 
-Authorised administrators can run `!stats [exchangeId|all]` (or the configured `discord.statsCommandName`) to inspect the
-latest trading volume totals persisted in the `VolumeSnapshot` table. The bot aggregates the newest snapshot for every
-tracked UID, summarising verified volume, account counts, and the timestamp of the most recent update. When exchange
-credentials support invitee exports (for example Blofin or Bitunix), the response also includes the total trading
-volume and invitee count reported by the exchange itself. Passing an `exchangeId` limits the summary to a single
-integration, while omitting arguments reports across all exchanges. Results are translated using the configured locale
-and failure scenarios surface descriptive errors alongside structured logs so operators can troubleshoot missing
-snapshots or permissions. Non-admin users receive the same unauthorised response used by the settings command.
+Authorised administrators can run `!stats [exchangeId|all] [uid]` (or the configured `discord.statsCommandName`) to
+inspect the latest affiliate telemetry. Without arguments the bot aggregates the newest snapshot for every tracked UID,
+summarising verified trading volume, deposits, account counts, and the timestamp of the most recent update. Providing an
+`exchangeId` limits the response to that connector, while passing a UID filters the invitee lists so support staff can
+review specific traders without paging through the full roster.
+
+When the exchange credentials expose invitee exports (for example Blofin) the command expands to include affiliate
+programme basics (commission, cashback, referral codes), direct and sub-affiliate totals, detailed per-invitee lines
+(UID, volume, deposit, withdrawal, KYC level, referral code, VIP level), and any configured sub-affiliate performance
+metrics. The Discord bot automatically splits long reports into multiple messages to remain within the platform's 2,000
+character limit. Responses are translated using the configured locale and failure scenarios surface descriptive errors
+alongside structured logs so operators can troubleshoot missing snapshots or permissions. Non-admin users receive the
+same unauthorised response used by the other maintenance commands.
 
 ## Interactive verification
 

@@ -3,7 +3,11 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { Sequelize, DataTypes } from 'sequelize';
 import logger from '../utils/logger.js';
-import { removeDuplicateVerifiedUsers, removeOrphanedForeignKeys } from './maintenance.js';
+import {
+  removeDuplicateVerifiedUsers,
+  removeOrphanedForeignKeys,
+  repairApiKeyHashUniqueIndex
+} from './maintenance.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -71,8 +75,7 @@ const defineModels = (sequelize) => {
   Models.ApiKey = sequelize.define('ApiKey', {
     api_key_hash: {
       type: DataTypes.STRING(64),
-      allowNull: false,
-      unique: true
+      allowNull: false
     },
     name: {
       type: DataTypes.STRING,
@@ -288,8 +291,10 @@ export const initializeDatabase = async () => {
     VerifiedUser: Models.VerifiedUser,
     VolumeSnapshot: Models.VolumeSnapshot
   });
+  await repairApiKeyHashUniqueIndex(sequelize);
 
   await sequelize.sync({ alter: true });
+  await repairApiKeyHashUniqueIndex(sequelize);
   initialized = true;
   return { sequelize, Models };
 };

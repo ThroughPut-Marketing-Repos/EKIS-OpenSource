@@ -8,6 +8,13 @@ integrity of the `verified_users` and `volume_snapshots` tables before `sequeliz
 enforce foreign key constraints. The routine clears references to deleted exchanges or API keys so
 the bot can boot even if manual database edits left behind dangling identifiers.
 
+The service also calls `repairApiKeyHashUniqueIndex` before and after schema sync. This keeps exactly
+one unique index on `api_keys.api_key_hash`: duplicate MySQL indexes such as `api_key_hash_2`,
+`api_key_hash_3`, and later suffixes are removed before sync, and a missing unique index is recreated
+after sync for fresh databases. The `ApiKey` model intentionally leaves uniqueness out of the
+column-level definition so Sequelize `alter` does not issue a new `ALTER TABLE ... UNIQUE` statement
+on every startup.
+
 ## Verified user deduplication
 
 - The cleanup now deletes any record that is missing either the `influencer` or `uid` key before
@@ -39,3 +46,12 @@ the bot can boot even if manual database edits left behind dangling identifiers.
 If the helper reports removals without updates it usually means NULL-key rows were purged. Operators
 can re-run the maintenance script without downtime; the routine is idempotent and skips work when the
 schema or model is unavailable.
+
+## API key hash index repair
+
+- Production MySQL can accumulate duplicate unique indexes when column-level Sequelize uniqueness is
+  applied repeatedly through `sync({ alter: true })`.
+- Startup maintenance keeps the preferred `api_key_hash` index and removes duplicate single-column
+  unique indexes on the same field before schema sync can hit MySQL's 64-key table limit.
+- The repair is idempotent. If the table does not exist yet, the pre-sync pass skips it and the
+  post-sync pass creates the unique index for the newly created table.

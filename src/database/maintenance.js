@@ -2,6 +2,9 @@ import { QueryTypes, Op } from 'sequelize';
 import logger from '../utils/logger.js';
 
 const TABLE_NAME = 'verified_users';
+const API_KEYS_TABLE_NAME = 'api_keys';
+const API_KEY_HASH_COLUMN = 'api_key_hash';
+const API_KEY_HASH_INDEX_NAME = 'api_key_hash';
 const MERGE_FIELDS = [
   'exchange',
   'exchangeId',
@@ -91,6 +94,23 @@ const resolveTableName = (tables, desiredName) => {
 };
 
 const tableExists = (tables, tableName) => Boolean(resolveTableName(tables, tableName));
+
+const getIndexFields = (index) => {
+  if (Array.isArray(index?.fields)) {
+    return index.fields.map((field) => field.attribute || field.name || field).filter(Boolean);
+  }
+
+  if (index?.columnName) {
+    return [index.columnName];
+  }
+
+  return [];
+};
+
+const isApiKeyHashUniqueIndex = (index) => {
+  const fields = getIndexFields(index);
+  return Boolean(index?.unique) && fields.length === 1 && fields[0] === API_KEY_HASH_COLUMN;
+};
 
 const getModelTableName = (model) => {
   if (!model) {
@@ -426,6 +446,57 @@ export const removeOrphanedForeignKeys = async (sequelize, models = {}) => {
   }
 
   return results;
+};
+
+export const repairApiKeyHashUniqueIndex = async (sequelize) => {
+  const queryInterface = sequelize.getQueryInterface();
+  const tables = await queryInterface.showAllTables();
+  const apiKeysTableName = resolveTableName(tables, API_KEYS_TABLE_NAME);
+
+  const result = {
+    droppedIndexes: [],
+    createdIndex: false
+  };
+
+  if (!apiKeysTableName) {
+    logger.debug('API keys table not found; skipping API key hash index repair.');
+    return result;
+  }
+
+  const indexes = await queryInterface.showIndex(apiKeysTableName);
+  const apiKeyHashIndexes = indexes.filter(isApiKeyHashUniqueIndex);
+  const canonicalIndex = apiKeyHashIndexes.find((index) => index.name === API_KEY_HASH_INDEX_NAME);
+  const duplicates = apiKeyHashIndexes
+    .filter((index) => index.name !== API_KEY_HASH_INDEX_NAME)
+    .sort((a, b) => {
+      return String(a.name).localeCompare(String(b.name), undefined, { numeric: true });
+    });
+
+  if (!canonicalIndex) {
+    for (const index of duplicates) {
+      await queryInterface.removeIndex(apiKeysTableName, index.name);
+      result.droppedIndexes.push(index.name);
+    }
+
+    await queryInterface.addIndex(apiKeysTableName, [API_KEY_HASH_COLUMN], {
+      name: API_KEY_HASH_INDEX_NAME,
+      unique: true
+    });
+    result.createdIndex = true;
+  } else {
+    for (const index of duplicates) {
+      await queryInterface.removeIndex(apiKeysTableName, index.name);
+      result.droppedIndexes.push(index.name);
+    }
+  }
+
+  if (result.droppedIndexes.length > 0 || result.createdIndex) {
+    logger.warn('Repaired API key hash unique indexes before schema sync.', result);
+  } else {
+    logger.debug('API key hash unique index already normalised.');
+  }
+
+  return result;
 };
 
 export default removeDuplicateVerifiedUsers;

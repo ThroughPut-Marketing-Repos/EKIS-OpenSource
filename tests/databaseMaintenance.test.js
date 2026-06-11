@@ -1,5 +1,9 @@
 import { Sequelize, DataTypes, QueryTypes } from 'sequelize';
-import { removeDuplicateVerifiedUsers, removeOrphanedForeignKeys } from '../src/database/maintenance.js';
+import {
+  removeDuplicateVerifiedUsers,
+  removeOrphanedForeignKeys,
+  repairApiKeyHashUniqueIndex
+} from '../src/database/maintenance.js';
 
 describe('removeDuplicateVerifiedUsers', () => {
   let sequelize;
@@ -24,7 +28,7 @@ describe('removeDuplicateVerifiedUsers', () => {
   };
 
   beforeEach(() => {
-    sequelize = new Sequelize('sqlite::memory:', { logging: false });
+    sequelize = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false });
     buildModel();
   });
 
@@ -153,7 +157,7 @@ describe('removeDuplicateVerifiedUsers', () => {
   });
 
   it('purges duplicate rows that contain NULL influencer or uid keys', async () => {
-    const nullableSequelize = new Sequelize('sqlite::memory:', { logging: false });
+    const nullableSequelize = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false });
     const NullableVerifiedUser = nullableSequelize.define('VerifiedUserNullable', {
       influencer: { type: DataTypes.STRING, allowNull: true },
       uid: { type: DataTypes.STRING, allowNull: true },
@@ -192,7 +196,7 @@ describe('removeOrphanedForeignKeys', () => {
   let VolumeSnapshot;
 
   beforeEach(async () => {
-    sequelize = new Sequelize('sqlite::memory:', { logging: false });
+    sequelize = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false });
 
     Exchange = sequelize.define('Exchange', {
       name: DataTypes.STRING
@@ -303,7 +307,7 @@ describe('removeOrphanedForeignKeys', () => {
   });
 
   it('repairs foreign keys when the verified users table uses legacy casing', async () => {
-    const legacySequelize = new Sequelize('sqlite::memory:', { logging: false });
+    const legacySequelize = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false });
 
     const LegacyVerifiedUser = legacySequelize.define('LegacyVerifiedUser', {
       influencer: { type: DataTypes.STRING, allowNull: false },
@@ -410,5 +414,100 @@ describe('removeOrphanedForeignKeys', () => {
     } finally {
       await legacySequelize.close();
     }
+  });
+});
+
+describe('repairApiKeyHashUniqueIndex', () => {
+  let sequelize;
+  let queryInterface;
+
+  const createApiKeysTable = async () => {
+    await queryInterface.createTable('api_keys', {
+      id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      api_key_hash: { type: DataTypes.STRING(64), allowNull: false },
+      createdAt: { type: DataTypes.DATE },
+      updatedAt: { type: DataTypes.DATE }
+    });
+  };
+
+  const listApiKeyHashUniqueIndexes = async () => {
+    const indexes = await queryInterface.showIndex('api_keys');
+    return indexes
+      .filter((index) => {
+        const fields = index.fields.map((field) => field.attribute || field.name || field);
+        return index.unique && fields.length === 1 && fields[0] === 'api_key_hash';
+      })
+      .map((index) => index.name)
+      .sort();
+  };
+
+  beforeEach(() => {
+    sequelize = new Sequelize({ dialect: 'sqlite', storage: ':memory:', logging: false });
+    queryInterface = sequelize.getQueryInterface();
+  });
+
+  afterEach(async () => {
+    await sequelize.close();
+  });
+
+  it('skips repair when the api keys table is missing', async () => {
+    const result = await repairApiKeyHashUniqueIndex(sequelize);
+
+    expect(result).toEqual({
+      droppedIndexes: [],
+      createdIndex: false
+    });
+  });
+
+  it('creates the api key hash unique index when it is missing', async () => {
+    await createApiKeysTable();
+
+    const result = await repairApiKeyHashUniqueIndex(sequelize);
+
+    expect(result).toEqual({
+      droppedIndexes: [],
+      createdIndex: true
+    });
+    expect(await listApiKeyHashUniqueIndexes()).toEqual(['api_key_hash']);
+  });
+
+  it('drops duplicate api key hash unique indexes and keeps one', async () => {
+    await createApiKeysTable();
+    await queryInterface.addIndex('api_keys', ['api_key_hash'], {
+      name: 'api_key_hash',
+      unique: true
+    });
+    await queryInterface.addIndex('api_keys', ['api_key_hash'], {
+      name: 'api_key_hash_2',
+      unique: true
+    });
+    await queryInterface.addIndex('api_keys', ['api_key_hash'], {
+      name: 'api_key_hash_3',
+      unique: true
+    });
+
+    const result = await repairApiKeyHashUniqueIndex(sequelize);
+
+    expect(result).toEqual({
+      droppedIndexes: ['api_key_hash_2', 'api_key_hash_3'],
+      createdIndex: false
+    });
+    expect(await listApiKeyHashUniqueIndexes()).toEqual(['api_key_hash']);
+  });
+
+  it('replaces suffixed api key hash indexes with the canonical index name', async () => {
+    await createApiKeysTable();
+    await queryInterface.addIndex('api_keys', ['api_key_hash'], {
+      name: 'api_key_hash_2',
+      unique: true
+    });
+
+    const result = await repairApiKeyHashUniqueIndex(sequelize);
+
+    expect(result).toEqual({
+      droppedIndexes: ['api_key_hash_2'],
+      createdIndex: true
+    });
+    expect(await listApiKeyHashUniqueIndexes()).toEqual(['api_key_hash']);
   });
 });
